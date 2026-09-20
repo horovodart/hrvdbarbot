@@ -32,15 +32,17 @@ python3 -m http.server 8732
 1. **Таблица.** Создать Google Таблицу на horovod.info@gmail.com, назвать «HOROVOD HUB · бар».
 2. **Скрипт.** Расширения → Apps Script. Вставить `apps-script/Code.gs` и `apps-script/Seed.gs`.
 3. **Свойства.** Project Settings → Script Properties:
-   - `BOT_TOKEN` — токен бота @hrvdbarbot;
-   - `ADMIN_IDS` — твой telegram id (нужен, пока лист «team» пуст).
+   - `BOT_TOKEN` — токен бота @hrvdbarbot (единственное обязательное);
+   - `ADMIN_IDS` — telegram id через запятую, необязательно.
 4. **Заливка.** Выполнить функцию `setup()` — создаст листы `products`, `counts`, `purchases`, `team`
    и зальёт данные. Проверить `selfTest()`.
 5. **Деплой.** Deploy → New deployment → Web app: Execute as **Me**, Who has access **Anyone**.
    Скопировать URL вида `https://script.google.com/macros/s/…/exec`.
 6. **Связать.** Вписать этот URL в `config.js → API`, запушить на GitHub Pages.
-7. **Команда.** В лист `team` добавить строки: telegram id, имя, роль. Пока лист пуст,
-   пускает только `ADMIN_IDS`.
+7. **Команда.** Лист `team` создаётся пустым. Первый, кто откроет приложение через Telegram,
+   автоматически записывается туда админом — дальше пускает только тех, кто есть в листе.
+   Поэтому открыть приложение первым должен ты. Остальных добавлять строками:
+   telegram id, имя, роль (id человек узнаёт у @userinfobot).
 8. **Бот.** BotFather → `/mybots` → @hrvdbarbot → Bot Settings → Menu Button → адрес GitHub Pages.
 
 Проверка API без Telegram (должна вернуть `ok:false` с просьбой открыть через Telegram —

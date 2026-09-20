@@ -3,7 +3,8 @@
  *
  * Свойства скрипта (Project Settings → Script Properties):
  *   BOT_TOKEN  — токен бота от BotFather. Никогда не попадает во фронтенд и в git.
- *   ADMIN_IDS  — telegram id через запятую: доступ, пока лист «team» пуст.
+ *   ADMIN_IDS  — telegram id через запятую (необязательно). Если и лист «team», и это
+ *                свойство пусты, админом становится первый, кто открыл приложение.
  *   SHEET_ID   — id таблицы (если скрипт не привязан к ней напрямую).
  *
  * Листы: products, counts, purchases, team.
@@ -63,17 +64,23 @@ function auth(initData){
 
   var user = JSON.parse(data.user || '{}');
   var id = String(user.id || '');
-  if (!allowed(id)) throw new Error('Тебя нет в списке команды (id ' + id + ')');
-  return {id:id, name: [user.first_name, user.last_name].filter(String).join(' ') || user.username || id};
+  var name = [user.first_name, user.last_name].filter(String).join(' ') || user.username || id;
+  if (!allowed(id, {name:name})) throw new Error('Тебя нет в списке команды (id ' + id + ')');
+  return {id:id, name:name};
 }
 
-function allowed(id){
+function allowed(id, user){
   if (!id) return false;
   var team = rows('team').map(function(r){ return String(r.tg_id).trim() }).filter(String);
   if (team.length) return team.indexOf(id) >= 0;
+
   var admins = String(prop('ADMIN_IDS') || '').split(',').map(function(s){ return s.trim() }).filter(String);
-  if (!admins.length) throw new Error('Список команды пуст: заполни лист «team» или свойство ADMIN_IDS');
-  return admins.indexOf(id) >= 0;
+  if (admins.length) return admins.indexOf(id) >= 0;
+
+  // Бутстрап: список команды пуст — первый, кто вошёл через Telegram, становится админом.
+  // Дальше пускает только тех, кто есть в листе «team».
+  sheet('team').appendRow([id, (user && user.name) || 'первый вход', 'admin']);
+  return true;
 }
 
 /* ---------------- действия ---------------- */
@@ -190,8 +197,7 @@ function setup(){
       var o = d[name][id]; o.id = id; insert(name, o);
     });
   });
-  var t = sheet('team');
-  if (t.getLastRow() < 2) t.appendRow(['', 'впиши telegram id и имя', 'admin']);
+  sheet('team'); // остаётся пустым: первый, кто откроет приложение, впишется сюда админом
   SpreadsheetApp.getActive().toast('Готово: ' + Object.keys(d.products).length + ' товаров');
 }
 

@@ -175,11 +175,11 @@ var SEED = {
       "cost": 1.07,
       "min": 6,
       "name": "San Pellegrino",
-      "note": "Metro 22.07: 0,92 € без НДС + 0,15 € залог. Вкус mandarino.",
+      "note": "Metro 22.07: 0,92 € без НДС + 0,15 € залог. В чеке «MAND.» — это вкус Clementina (мандарин).",
       "order": 7,
       "pack": 6,
       "shape": "can",
-      "vol": "0,33 л · банка"
+      "vol": "0,33 л · банка · мандарин"
     },
     "slivki": {
       "cat": "shared",
@@ -247,11 +247,11 @@ var SEED = {
       "cost": 0.94,
       "min": 6,
       "name": "Zlatý Bažant tmavé",
-      "note": "Metro 22.07: 0,79 € без НДС + 0,15 € залог.",
+      "note": "Metro 22.07: 0,79 € без НДС + 0,15 € залог. В чеке код PLZ — то же, что у Hell и колы, то есть банка.",
       "order": 2.5,
       "pack": 6,
-      "shape": "bottle",
-      "vol": "0,5 л · стекло · тёмное"
+      "shape": "can",
+      "vol": "0,5 л · банка · тёмное"
     }
   },
   "purchases": {
