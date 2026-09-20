@@ -166,8 +166,8 @@ var SEED = {
       "note": "Kozel нет в чеках от 22.07 — впиши цену закупки.",
       "order": 1,
       "pack": 20,
-      "shape": "bottle",
-      "vol": "0,5 л · стекло · 4,2%"
+      "shape": "can",
+      "vol": "0,5 л · банка · 4,2%"
     },
     "pelle033": {
       "cat": "sale",
@@ -202,8 +202,8 @@ var SEED = {
       "note": "Metro 22.07: 0,49 € без НДС + 0,15 € залог.",
       "order": 2,
       "pack": 20,
-      "shape": "bottle",
-      "vol": "0,5 л · стекло · 4%"
+      "shape": "can",
+      "vol": "0,5 л · банка · 4%"
     },
     "staro15": {
       "cap": "#D9A441",
@@ -238,8 +238,8 @@ var SEED = {
       "note": "Metro 22.07: 0,64 € + 0,15 € залог. Birell 0,0% (0,65 €) считаем этой же позицией — разные вкусы.",
       "order": 3,
       "pack": 6,
-      "shape": "bottle",
-      "vol": "0,5 л · nealko, разные вкусы"
+      "shape": "can",
+      "vol": "0,5 л · банка · nealko, разные вкусы"
     },
     "zbtmave": {
       "cat": "sale",
