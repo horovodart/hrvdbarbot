@@ -2,7 +2,7 @@
 window.HUB_CONFIG = {
   // URL веб-приложения Google Apps Script. Пусто → приложение работает
   // в демо-режиме: читает hub-bar-data.json и держит правки в браузере.
-  API: "",
+  API: "https://script.google.com/macros/s/AKfycbzi8qpBcZcRBG2ILmajQ6Nj-8DelwH8y1cUJkOZqeTucJnkzW6vaeNixEKXuIIUDKJ9/exec",
 
   SEED: "hub-bar-data.json",
   SALE_PRICE: 1.50,   // цена напитка для команды
