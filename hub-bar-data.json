@@ -19,6 +19,7 @@
         "kofola2": 6,
         "kozel05": 21,
         "pelle033": 12,
+        "redbull250": 0,
         "slivki": 1,
         "staro05": 7,
         "staro15": 12,
@@ -44,6 +45,7 @@
         "kofola2": 2,
         "kozel05": 21,
         "pelle033": 0,
+        "redbull250": 0,
         "slivki": 1,
         "staro05": 7,
         "staro15": 12,
@@ -176,6 +178,18 @@
       "pack": 6,
       "shape": "can",
       "vol": "0,33 л · банка · мандарин"
+    },
+    "redbull250": {
+      "cat": "sale",
+      "color": "#1B3A6B",
+      "cost": null,
+      "min": 6,
+      "name": "Red Bull",
+      "note": "Новая позиция, в чеках 22.07 и 17.08 её нет. Впиши цену закупки — посчитается маржа.",
+      "order": 5.5,
+      "pack": 24,
+      "shape": "can",
+      "vol": "0,25 л · банка"
     },
     "slivki": {
       "cat": "shared",
