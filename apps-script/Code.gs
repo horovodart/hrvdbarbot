@@ -36,7 +36,11 @@ function respond(fn){
   var out;
   try { out = {ok:true, data: fn()} }
   catch (err) { out = {ok:false, error: String(err && err.message || err)} }
-  return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+  // всё не-ASCII уходит как \uXXXX: ответ не зависит от того, какую кодировку решит применить клиент
+  var json = JSON.stringify(out).replace(/[\u0080-\uFFFF]/g, function(c){
+    return '\\u' + ('0000' + c.charCodeAt(0).toString(16)).slice(-4);
+  });
+  return ContentService.createTextOutput(json).setMimeType(ContentService.MimeType.JSON);
 }
 
 /* ---------------- доступ ---------------- */
