@@ -68,3 +68,27 @@ curl -s -X POST -H 'Content-Type: text/plain' -d '{"action":"list"}' "ВСТАВ
 Имя файла = id товара: `img/kozel05.webp`. Если файла нет, рисуется силуэт тары —
 ломаться ничего не будет. Фото — packshot'ы производителей и магазинов с вырезанным фоном,
 для внутреннего инструмента команды.
+
+## Боевые адреса
+
+| Что | Где |
+|---|---|
+| Приложение | https://horovodart.github.io/hrvdbarbot/ |
+| Бот | @hrvdbarbot (кнопка меню «Бар») |
+| API | Apps Script Web App, URL в `config.js` |
+| Таблица | Google Sheets `1EAp62lw_p1MLIDL_vFgPVupboA7DosjZ3afDUblJ6LQ` на horovod.info@gmail.com |
+
+Данные в таблицу заливаются сами при первом обращении из Telegram. Первый, кто откроет
+приложение, записывается в лист `team` админом.
+
+### Если правишь Apps Script
+
+Код в `apps-script/` — исходник; в проекте Apps Script лежит склейка `Code.gs` + `Seed.gs`
+одним файлом. Чтобы обновить: собрать склейку, положить в буфер **через AppleScript**
+(обычный `pbcopy` без UTF-8 локали портит кириллицу), вставить в редактор, затем
+Deploy → Manage deployments → ✏️ → New version — тогда адрес `/exec` не меняется.
+
+```bash
+cat apps-script/Code.gs > /tmp/c.gs && cat apps-script/Seed.gs >> /tmp/c.gs
+osascript -e 'set the clipboard to (read POSIX file "/tmp/c.gs" as «class utf8»)'
+```
