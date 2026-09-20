@@ -62,7 +62,7 @@ h2.sec em{font:500 12px var(--body);text-transform:none;letter-spacing:0;font-st
 .cb{padding:11px 12px 13px;display:flex;flex-direction:column;gap:1px;flex:1}
 .cb .nm{font-weight:600;line-height:1.25;letter-spacing:-.01em}
 .cb .vol{color:var(--ink-2);font-size:12.5px;margin-top:1px}
-.cb .foot{margin-top:9px;display:flex;align-items:baseline;justify-content:space-between;gap:6px;flex-wrap:nowrap}
+.cb .foot{display:flex;align-items:baseline;justify-content:space-between;gap:6px;flex-wrap:nowrap}
 .cb .stk{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tag{white-space:nowrap}
 .cb .stk b{font:700 17px/1 var(--display);letter-spacing:-.02em}
@@ -165,3 +165,8 @@ svg.fb{display:none}
 
 .chips[hidden]{display:none}
 .dock[hidden]{display:none}
+
+/* одинаковая высота карточек: описание в одну строку, остаток прижат к низу */
+.cb .nm{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.cb .vol{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.cb .foot{margin-top:auto;padding-top:9px}
