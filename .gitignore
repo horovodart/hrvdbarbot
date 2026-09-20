@@ -1,2 +1,5 @@
 .DS_Store
 .cand/
+node_modules/
+package-lock.json
+.clasp.json

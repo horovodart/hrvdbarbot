@@ -22,7 +22,8 @@ var NUM_FIELDS  = {cost:1, pack:1, min:1, order:1, cash:1, card:1, total:1};
 
 /* ---------------- вход ---------------- */
 
-function doGet(e)  { return respond(function(){ return handle('list', {}, null) }) }
+// GET — только проверка живости. Данные отдаются исключительно на POST с подписью Telegram.
+function doGet(e)  { return respond(function(){ return {alive:true, ts:new Date().toISOString()} }) }
 function doPost(e) {
   return respond(function(){
     var body = {};
@@ -112,6 +113,7 @@ function handle(action, p, user){
 }
 
 function listAll(){
+  if (sheet('products').getLastRow() < 2) setup();   // первый запуск — заливаем стартовые данные сами
   var out = {};
   ['products','counts','purchases'].forEach(function(name){
     var o = {};
@@ -126,8 +128,9 @@ function listAll(){
 function prop(k){ return PropertiesService.getScriptProperties().getProperty(k) }
 function uid(pfx){ return pfx + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,6) }
 
+var SHEET_ID_DEFAULT = '1EAp62lw_p1MLIDL_vFgPVupboA7DosjZ3afDUblJ6LQ';   // таблица «HOROVOD HUB · бар»
 function book(){
-  var id = prop('SHEET_ID');
+  var id = prop('SHEET_ID') || SHEET_ID_DEFAULT;
   return id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
 }
 function sheet(name){
@@ -189,6 +192,7 @@ function remove(name, id){
 /** Запусти один раз вручную: создаст листы и зальёт данные из Seed.gs. */
 function setup(){
   var d = SEED;
+  try { book().rename('HOROVOD HUB \u00b7 \u0431\u0430\u0440') } catch (e) {}
   ['products','counts','purchases','team'].forEach(function(n){ sheet(n) });
   ['products','counts','purchases'].forEach(function(name){
     var sh = sheet(name);
@@ -198,7 +202,7 @@ function setup(){
     });
   });
   sheet('team'); // остаётся пустым: первый, кто откроет приложение, впишется сюда админом
-  SpreadsheetApp.getActive().toast('Готово: ' + Object.keys(d.products).length + ' товаров');
+  try { SpreadsheetApp.getActive().toast('Готово: ' + Object.keys(d.products).length + ' товаров') } catch (e) {}
 }
 
 /** Проверка без Telegram: выполни в редакторе и посмотри лог. */
