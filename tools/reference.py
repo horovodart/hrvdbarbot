@@ -6,13 +6,15 @@
 
   python3 tools/reference.py [файл-данных]
 """
-import json, sys, datetime as dt
+import json, math, sys, datetime as dt
 
 SALE, HORIZON, AMBER, TARGET = 1.50, 14, 21, 28
+GOAL_RATE, GOAL_PERIODS = 0.66, 2
 FREE = ("water", "snack")
 
 def iso(s): return dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
 def days(a, b): return (iso(b) - iso(a)).total_seconds() / 86400
+def jsround(x): return math.floor(x + 0.5)   # JS округляет половину вверх, python round() — к чётному
 
 def compute(d, now=None):
     now = now or dt.datetime.now(dt.timezone.utc).isoformat()
@@ -48,9 +50,16 @@ def compute(d, now=None):
                 if p.get("cost") is not None: cost_f += v * p["cost"]
         backed = sum(r.get("amount", 0) for r in rets
                      if r.get("toTill") and a["date"] < r["date"] <= b["date"])
-        exp = sale_u * SALE
+        # подсчёт, сохранённый приложением, несёт свои деньги — период не пересчитываем
+        fz = b.get("frozen") if isinstance(b.get("frozen"), dict) else None
+        if fz:
+            if fz.get("costSale")  is not None: cost_s = fz["costSale"]
+            if fz.get("costWater") is not None: cost_f = fz["costWater"]
+            if fz.get("depSpent")  is not None: dep    = fz["depSpent"]
+        price = fz["price"] if fz and fz.get("price") is not None else SALE
+        exp = sale_u * price
         got = (b.get("cash") or 0) + (b.get("card") or 0) - backed
-        recs.append(dict(id=b["id"], frm=a, to=b, days=days(a["date"], b["date"]), cons=cons, meas=meas,
+        recs.append(dict(id=b["id"], frm=a, to=b, frozen=bool(fz), price=price, days=days(a["date"], b["date"]), cons=cons, meas=meas,
                          bought=bt, saleUnits=sale_u, freeUnits=free_u, backed=backed,
                          buys=len([x for x in purch if a["date"] < x["date"] <= b["date"]]),
                          expected=exp, got=got, short=got - exp, costSale=cost_s, costWater=cost_f,
@@ -66,9 +75,15 @@ def compute(d, now=None):
     for pid, p in P.items():
         base = (last.get("stock") or {}).get(pid) if last else None
         tot = dd = 0
+        periods = []
         for r in recs:
             if pid not in r["cons"]: continue
-            if r["meas"][pid] and r["days"] >= 1: tot += r["cons"][pid]; dd += r["days"]
+            m = r["meas"][pid]
+            periods.append(dict(frm=r["frm"]["date"], to=r["to"]["date"], days=r["days"], cons=r["cons"][pid],
+                                bought=r["bought"].get(pid, 0), measured=m,
+                                perWeek=max(0.0, r["cons"][pid] / r["days"] * 7) if m and r["days"] >= 1 else None))
+            # период короче суток — не измерение, в средний расход не идёт
+            if m and r["days"] >= 1: tot += r["cons"][pid]; dd += r["days"]
         rate = max(0.0, tot / dd) if dd > 0 else None
         exact = (base or 0) + since.get(pid, 0)
         est = max(0.0, exact - rate * dSince) if rate else exact
@@ -77,7 +92,7 @@ def compute(d, now=None):
         st = "none"
         if restock:
             st = "green"
-            if round(est) <= 0: st = "red"
+            if jsround(est) <= 0: st = "red"
             elif left is not None:
                 if left < HORIZON: st = "red"
                 elif left < AMBER: st = "amber"
@@ -88,9 +103,8 @@ def compute(d, now=None):
         if restock:
             if rate: need = max(0.0, rate * TARGET - est)
             elif st != "green" and p.get("min"): need = p["min"] * 2 - est
-            import math
             need = math.ceil(need / p["pack"]) * p["pack"] if need > 0 and p.get("pack") else math.ceil(need)
-        items[pid] = dict(est=est, rate=rate, daysLeft=left, st=st, need=need, restock=restock,
+        items[pid] = dict(est=est, exact=exact, estimated=bool(rate) and dSince >= 1, periods=periods, rate=rate, daysLeft=left, st=st, need=need, restock=restock,
                           bought=since.get(pid, 0), base=base)
 
     start = counts[0]["date"] if counts else None
@@ -100,12 +114,27 @@ def compute(d, now=None):
         if not dep: continue
         for r in recs: paid += max(0, r["cons"].get(pid, 0)) * dep
         if items[pid]["rate"]: paid += items[pid]["rate"] * dSince * dep
-    # короткие периоды не идут в средний расход — как в приложении
     back = sum(r.get("amount", 0) for r in rets if not start or r["date"] > start)
     tare = dict(units=sum(r.get("units", 0) for r in rets), amount=sum(r.get("amount", 0) for r in rets),
                 waiting=paid - back, paid=paid, back=back,
                 last=max((r["date"] for r in rets), default=None))
-    return dict(recs=recs, items=items, tare=tare, dSince=dSince, last=last)
+    # «карма» — считается от последней амнистии, старый долг не тащим
+    amnesty_at = max((c["date"] for c in counts if c.get("amnesty")), default=None)
+    scored = [r for r in recs if r["frm"]["date"] >= amnesty_at] if amnesty_at else recs
+    a_exp = sum(r["expected"] for r in scored); a_got = sum(r["got"] for r in scored)
+    allm = dict(expected=a_exp, got=a_got, units=sum(r["saleUnits"] for r in scored),
+                cost=sum(r["costSale"] + r["costWater"] for r in scored),
+                short=a_got - a_exp, since=amnesty_at, periods=len(scored))
+    allm["net"] = a_got - allm["cost"]
+    allm["payRate"] = a_got / a_exp if a_exp > 0 else None
+    streak = 0
+    for r in reversed(scored):
+        if r["payRate"] is not None and r["payRate"] >= GOAL_RATE: streak += 1
+        else: break
+    allm["streak"] = streak
+    allm["goalReached"] = streak >= GOAL_PERIODS
+
+    return dict(recs=recs, items=items, tare=tare, dSince=dSince, last=last, all=allm)
 
 if __name__ == "__main__":
     d = json.load(open(sys.argv[1] if len(sys.argv) > 1 else "hub-bar-data.json"))

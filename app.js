@@ -12,7 +12,9 @@ const $  = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const eur = n => { const v = Math.abs(+n||0) < 0.005 ? 0 : (+n||0);      // без «−0,00 €»
   return (v<0?"−":"") + Math.abs(v).toFixed(2).replace(".",",") + " €" };
-const dec = n => (n == null || !isFinite(n)) ? "—" : n.toFixed(1).replace(".",",");
+const dec = n => { if(n == null || !isFinite(n)) return "—";   // без «−0,0»: знак как в eur()
+  const v = Math.abs(n) < 0.05 ? 0 : n;
+  return (v<0?"−":"") + Math.abs(v).toFixed(1).replace(".",",") };
 const ddmm = iso => { const d = new Date(iso); return String(d.getDate()).padStart(2,"0")+"."+String(d.getMonth()+1).padStart(2,"0") };
 const days = (a,b) => (new Date(b) - new Date(a)) / 864e5;
 const plural = (n,a,b,c) => { n = Math.abs(n)%100; const m = n%10; if(n>10&&n<20) return c; if(m>1&&m<5) return b; if(m==1) return a; return c };
@@ -95,7 +97,7 @@ function model(){
       if(r.cons[p.id] == null) continue;
       const measured = r.meas[p.id];
       periods.push({from:r.from.date, to:r.to.date, days:r.days, cons:r.cons[p.id], bought:r.bought[p.id]||0, measured,
-                    perWeek: measured && r.days>0 ? Math.max(0,r.cons[p.id]/r.days*7) : null});
+                    perWeek: measured && r.days>=1 ? Math.max(0,r.cons[p.id]/r.days*7) : null});
       // Период короче суток — не измерение: пара подсчётов подряд давала бы
       // расход в сотни штук в день и заказ на тысячи штук.
       if(measured && r.days >= 1){ tot += r.cons[p.id]; dd += r.days }

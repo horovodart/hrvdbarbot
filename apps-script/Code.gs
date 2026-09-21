@@ -93,7 +93,12 @@ function auth(initData){
 
   var user = JSON.parse(data.user || '{}');
   var id = String(user.id || '');
-  var name = [user.first_name, user.last_name].filter(String).join(' ') || user.username || id;
+  // filter(String) пропускал undefined («undefined» — правдивая строка), а join делал из него
+  // пустоту: у человека без фамилии имя становилось " ", и запасные варианты не срабатывали
+  var name = [user.first_name, user.last_name]
+    .map(function(x){ return x == null ? '' : String(x).trim() })
+    .filter(function(x){ return x })
+    .join(' ') || String(user.username || '').trim() || id;
   if (!allowed(id, {name:name})) throw new Error('Тебя нет в списке команды (id ' + id + ')');
   return {id:id, name:name};
 }
