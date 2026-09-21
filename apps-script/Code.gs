@@ -13,14 +13,14 @@
 
 var COLS = {
   products: ['id','name','vol','cat','shape','color','cap','cost','dep','pack','min','order','note','hidden','phaseout'],
-  counts:   ['id','date','by','cash','card','initial','note','source','stock','frozen'],
+  counts:   ['id','date','by','cash','card','initial','note','source','stock','frozen','amnesty'],
   purchases:['id','date','by','total','source','items'],
   returns:  ['id','date','by','amount','units','toTill','note'],
   team:     ['tg_id','name','role']
 };
 var JSON_FIELDS = {stock:1, items:1, frozen:1};
 var NUM_FIELDS  = {cost:1, dep:1, pack:1, min:1, order:1, cash:1, card:1, total:1, amount:1, units:1};
-var BOOL_FIELDS = {hidden:1, initial:1, phaseout:1, toTill:1};
+var BOOL_FIELDS = {hidden:1, initial:1, phaseout:1, toTill:1, amnesty:1};
 
 /* ---------------- вход ---------------- */
 
@@ -131,7 +131,7 @@ function handle(action, p, user){
       ensureCols('counts');
       insert('counts', {id: uid('c'), date: p.date || new Date().toISOString(), by: p.by || who,
                         cash: p.cash, card: p.card, initial:'', note: p.note || null, source: p.source || null,
-                        stock: p.stock || {}, frozen: p.frozen || null});
+                        stock: p.stock || {}, frozen: p.frozen || null, amnesty: !!p.amnesty});
     } else if (action === 'addReturn'){
       insert('returns', {id: uid('r'), date: p.date || new Date().toISOString(), by: p.by || who,
                          amount: p.amount || 0, units: p.units || 0, toTill: !!p.toTill,

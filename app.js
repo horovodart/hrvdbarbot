@@ -147,13 +147,26 @@ function model(){
   tare.paid = paid;
   tare.back = back;
 
-  // накопительный счёт за всё время: он и есть «карма»
-  const all = recs.reduce((o,r) => ({expected:o.expected+r.expected, got:o.got+r.got,
+  // Накопительный счёт — «карма». Считается от последней амнистии: старый долг
+  // не тащим, иначе планка недостижима и приложение перестают открывать.
+  const amnestyAt = counts.filter(c => c.amnesty).map(c => c.date).sort().pop() || null;
+  const scored = amnestyAt ? recs.filter(r => r.from.date >= amnestyAt) : recs;
+  const all = scored.reduce((o,r) => ({expected:o.expected+r.expected, got:o.got+r.got,
     cost:o.cost+r.costSale+r.costWater, units:o.units+r.saleUnits}),
     {expected:0, got:0, cost:0, units:0});
   all.short = all.got - all.expected;
   all.net   = all.got - all.cost;
   all.payRate = all.expected > 0 ? all.got/all.expected : null;
+  all.since  = amnestyAt;
+  all.periods = scored.length;
+
+  // сколько периодов подряд с конца держим планку — по ним снижаем цену
+  all.streak = 0;
+  for(let i = scored.length - 1; i >= 0; i--){
+    if(scored[i].payRate != null && scored[i].payRate >= C.GOAL_RATE) all.streak++;
+    else break;
+  }
+  all.goalReached = all.streak >= C.GOAL_PERIODS;
 
   return {counts, purch, recs, last, lastRec:recs[recs.length-1], items, dSince, tare, all};
 }
@@ -169,7 +182,7 @@ function stockLine(it){
   const n = Math.round(it.est);
   if(n <= 0) return `<div class="stk red"><b class="num">0</b><span>нет</span></div>`;
   const t = it.daysLeft != null
-    ? (it.daysLeft > 60 ? "надолго" : "на "+Math.floor(it.daysLeft)+" дн.")
+    ? (it.daysLeft > 60 ? "надолго" : it.daysLeft < 1 ? "меньше дня" : "на "+Math.floor(it.daysLeft)+" дн.")
     : plural(n,"штука","штуки","штук");
   return `<div class="stk ${it.st!=="green"?it.st:""}"><b class="num">${it.estimated?"≈":""}${n}</b><span>${t}</span></div>`;
 }
@@ -305,6 +318,7 @@ function renderCount(M){
     <div class="field"><label for="cCard">На карту «napoj HUB», €</label><input id="cCard" value="${esc(S.f.cCard||"")}" inputmode="decimal" placeholder="0"></div></div>
     <div class="panel pad" style="margin-top:12px" id="preview"></div>
     <div class="field" style="margin-top:12px"><label for="cWho">Кто считал</label><input id="cWho" value="${esc(S.f.cWho||"")}" placeholder="имя"></div>
+    <label class="chk"><input type="checkbox" id="cAmnesty" ${S.f.amnesty?"checked":""}><span><b>Амнистия</b> — списать весь прошлый недобор и начать счёт с этого подсчёта</span></label>
     <p class="note" style="margin-top:10px">После сохранения кассу опустоши — следующий период считается с нуля.</p>`;
   return h;
 }
@@ -345,12 +359,13 @@ function renderHist(M){
       h += `<div class="panel pad"><div class="h"><b>Подсчёт ${ddmm(r.to.date)}</b><span class="pill ${r.net>=0?"green":"red"} num">${r.net>0?"+":""}${eur(r.net)}</span></div>
         <p class="note" style="margin:0 0 10px">${ddmm(r.from.date)}–${ddmm(r.to.date)} · ${r.days < 1 ? "меньше суток" : Math.round(r.days)+" дн."}</p>
         ${money(r)}<p class="note" style="margin:10px 0 0">${top}</p>
-        <div style="text-align:right;margin-top:6px">${r.to.by?`<span class="note">считал(а): ${esc(r.to.by)}</span>`:""} <button class="del" data-del="counts/${esc(r.to.id)}">удалить</button></div></div>`;
+        ${r.to.note?`<p class="note" style="margin:8px 0 0">${esc(r.to.note)}</p>`:""}
+        <div style="text-align:right;margin-top:6px">${r.to.by?`<span class="note">считал(а): ${esc(r.to.by)}</span>`:""} <button class="del ${S.armed==="counts/"+r.to.id?"armed":""}" data-del="counts/${esc(r.to.id)}">${S.armed==="counts/"+r.to.id?"точно удалить?":"удалить"}</button></div></div>`;
     } else if(e.t === "buy"){ const p = e.p;
       const list = Object.entries(p.items||{}).filter(([,v])=>v>0).map(([k,v])=>`${esc(name(k))} +${esc(v)}`).join(" · ");
       h += `<div class="panel pad"><div class="h"><b>Закупка ${ddmm(p.date)}</b>${p.total?`<span class="num">${eur(+p.total)}</span>`:""}</div>
         <p class="note" style="margin:0">${list}</p>${p.source?`<p class="note" style="margin:6px 0 0">${esc(p.source)}</p>`:""}
-        <div style="text-align:right;margin-top:6px">${p.by?`<span class="note">${esc(p.by)}</span>`:""} <button class="del" data-del="purchases/${esc(p.id)}">удалить</button></div></div>`;
+        <div style="text-align:right;margin-top:6px">${p.by?`<span class="note">${esc(p.by)}</span>`:""} <button class="del ${S.armed==="purchases/"+p.id?"armed":""}" data-del="purchases/${esc(p.id)}">${S.armed==="purchases/"+p.id?"точно удалить?":"удалить"}</button></div></div>`;
     } else {
       h += `<div class="panel pad"><div class="h"><b>Опорный подсчёт ${ddmm(e.c.date)}</b></div>
         <p class="note" style="margin:0">${esc(e.c.note || "Точка отсчёта.")}</p>${e.c.source?`<p class="note" style="margin:6px 0 0">${esc(e.c.source)}</p>`:""}</div>`;
@@ -397,7 +412,7 @@ function sheet(p){
       </div>
       <div class="kv num">
         ${kv("Остаток", (it.estimated?"≈ ":"")+n+" шт", it.st!=="green"?it.st:"")}
-        ${kv("Хватит на", it.daysLeft!=null ? (it.daysLeft>60?"больше 60 дн.":Math.floor(it.daysLeft)+" "+plural(Math.floor(it.daysLeft),"день","дня","дней")) : "нет данных", it.daysLeft==null?"dim":(it.st!=="green"?it.st:""))}
+        ${kv("Хватит на", it.daysLeft!=null ? (it.daysLeft>60?"больше 60 дн.":it.daysLeft<1?"меньше дня":Math.floor(it.daysLeft)+" "+plural(Math.floor(it.daysLeft),"день","дня","дней")) : "нет данных", it.daysLeft==null?"dim":(it.st!=="green"?it.st:""))}
         ${kv("Средний расход", it.rate != null ? dec(it.rate*7)+" в нед." : "нет данных", it.rate!=null?"":"dim")}
         ${kv("Купить на "+TARGET+" дн.", it.need ? "+"+it.need+" шт" : "не нужно", it.need?"":"dim")}
       </div>
@@ -453,6 +468,7 @@ function tareSheet(M){
       <div class="fields" style="margin-top:16px">
         <div class="field"><label for="tSum">Получено, €</label><input id="tSum" inputmode="decimal" placeholder="например 12,45"></div>
         <div class="field"><label for="tWho">Кто сдавал</label><input id="tWho" placeholder="имя"></div>
+        <div class="field" style="min-width:100%"><label for="tNote">Примечание</label><input id="tNote" placeholder="необязательно"></div>
       </div>
       <p class="note" id="tCalc" style="margin:10px 0 0">Это <b>0 шт</b> тары.</p>
       <label class="chk"><input type="checkbox" id="tTill" checked><span><b>Деньги положил в кассу</b> — тогда приложение не посчитает их донатами за напитки</span></label>
@@ -484,7 +500,8 @@ function tareSheet(M){
     const btn = bg.querySelector("#tSave"); btn.disabled = true;
     try{
       await apply(API.addReturn({date:new Date().toISOString(), amount, units:units(amount),
-        toTill:bg.querySelector("#tTill").checked, by:bg.querySelector("#tWho").value.trim()||null}));
+        toTill:bg.querySelector("#tTill").checked, by:bg.querySelector("#tWho").value.trim()||null,
+        note:bg.querySelector("#tNote").value.trim()||null}));
       toast(`Записал: ${units(amount)} шт на ${eur(amount)}`); haptic("medium"); close();
     }catch(e){ toast("Не сохранилось: "+e.message); btn.disabled = false }
   };
@@ -500,14 +517,21 @@ function moneySheet(r){
       <h3>Деньги за период</h3>
       <div class="meta">${ddmm(r.from.date)} – ${ddmm(r.to.date)} · ${Math.round(r.days)} дн.</div>
       <div style="margin-top:16px">${money(r)}</div>
-      ${S.M.recs.length > 1 ? `<div class="blk"><h4>За всё время</h4>
+      ${S.M.all.periods ? `<div class="blk"><h4>${S.M.all.since ? "С амнистии "+ddmm(S.M.all.since) : "За всё время"}</h4>
         <dl class="recon num">
           <dt>Выпито платных</dt><dd>${S.M.all.units} шт</dd>
           <dt>Должно было прийти</dt><dd>${eur(S.M.all.expected)}</dd>
           <dt>Пришло</dt><dd>${eur(S.M.all.got)}${S.M.all.payRate!=null?" · "+Math.round(S.M.all.payRate*100)+"%":""}</dd>
           <dt>Потрачено на напитки</dt><dd>−${eur(S.M.all.cost)}</dd>
           <dt class="tot">Бар в сумме</dt><dd class="tot ${S.M.all.net>=0?"pos":"neg"}">${S.M.all.net>0?"+":""}${eur(S.M.all.net)}</dd>
-        </dl></div>` : ""}
+        </dl>
+        <div class="goal">
+          <div class="goal-bar"><i style="width:${Math.min(100, Math.round((S.M.all.payRate||0)*100))}%" class="${(S.M.all.payRate||0) >= C.GOAL_RATE ? "ok" : ""}"></i><b style="left:${C.GOAL_RATE*100}%"></b></div>
+          <p class="note" style="margin:8px 0 0">${
+            S.M.all.goalReached
+              ? `Планка взята ${S.M.all.streak} ${plural(S.M.all.streak,"период","периода","периодов")} подряд — можно опускать цену до ${eur(1)}.`
+              : `Платят за ${Math.round((S.M.all.payRate||0)*100)}% выпитого. Цель — ${Math.round(C.GOAL_RATE*100)}%: ${C.GOAL_PERIODS} ${plural(C.GOAL_PERIODS,"период","периода","периодов")} подряд, и цена падает до ${eur(1)}.${S.M.all.streak?` Держим ${S.M.all.streak} подряд.`:""}`
+          }</p></div></div>` : ""}
       <div class="blk"><h4>Куда ушли деньги на бесплатное</h4>
         <dl class="recon num">${S.products.filter(p => isFree(p.cat) && r.cons[p.id] > 0)
           .sort((x,y) => (r.cons[y.id]*(y.cost||0)) - (r.cons[x.id]*(x.cost||0)))
@@ -572,16 +596,22 @@ document.addEventListener("click", async e => {
   const rf = e.target.closest("#refresh");
   if(rf){ rf.classList.add("spin"); try{ await apply(API.list()); toast("Обновлено") }catch(err){ toast("Не вышло: "+err.message) } rf.classList.remove("spin"); return }
   const d = e.target.closest("[data-del]");
-  if(d){ if(!d.classList.contains("armed")){ d.classList.add("armed"); d.textContent = "точно удалить?"; return }
+  if(d){ if(S.armed !== d.dataset.del){ S.armed = d.dataset.del; render(); return }
     const [col,id] = d.dataset.del.split("/");
+    S.armed = null;
     try{ await apply(API.del(col,id)); toast("Удалено") }catch(er){ toast("Ошибка: "+er.message) } return }
   if(e.target.id === "npAdd") return addProduct();
   if(e.target.id === "dockBtn") return e.target.dataset.a === "buy" ? saveBuy() : saveCount();
 });
 document.addEventListener("input", e => {
   const i = e.target;
-  if(i.dataset?.k) setVal(i.dataset.k, i.dataset.id, Math.max(0, parseInt(i.value)||0));
+  if(i.dataset?.k){
+    const v = Math.max(0, parseInt(i.value)||0);
+    if(String(v) !== i.value.trim() && i.value.trim() !== "") i.value = v;   // не даём полю врать
+    setVal(i.dataset.k, i.dataset.id, v);
+  }
   if(["buySum","buyWho","cCash","cCard","cWho"].includes(i.id)) S.f[i.id] = i.value;
+  if(i.id === "cAmnesty") S.f.amnesty = i.checked;
   if(i.id === "cCash" || i.id === "cCard") previewCount(S.M);
 });
 addEventListener("scroll", () => $("#top").classList.toggle("stuck", scrollY > 6), {passive:true});
@@ -623,6 +653,7 @@ async function saveCount(){
     }
     await apply(API.addCount({date:new Date().toISOString(), stock,
       cash:num($("#cCash").value), card:num($("#cCard").value), by:$("#cWho").value.trim()||null,
+      amnesty: !!$("#cAmnesty")?.checked,
       frozen:{price:SALE, saleUnits:saleU, freeUnits:freeU, costSale:+cSale.toFixed(4),
               costWater:+cWater.toFixed(4), depSpent:+dep.toFixed(4)}}));
     S.count = null; S.f.cCash = S.f.cCard = ""; toast("Подсчёт сохранён"); haptic("medium");

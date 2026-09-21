@@ -187,3 +187,10 @@ button.sec em{display:flex;align-items:center;gap:4px}
 button.sec svg{width:16px;height:16px;transition:transform .18s}
 button.sec[aria-expanded="true"] svg{transform:rotate(180deg)}
 button.sec:active{opacity:.6}
+
+/* планка оплаты */
+.goal{margin-top:14px}
+.goal-bar{position:relative;height:10px;border-radius:999px;background:var(--soft);overflow:visible}
+.goal-bar i{display:block;height:100%;border-radius:999px;background:var(--red);transition:width .3s}
+.goal-bar i.ok{background:var(--green)}
+.goal-bar b{position:absolute;top:-4px;width:2px;height:18px;border-radius:1px;background:var(--ink);opacity:.5}
