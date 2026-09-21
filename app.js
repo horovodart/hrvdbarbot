@@ -2,7 +2,7 @@
 (function(){
 const C = window.HUB_CONFIG, TG = window.Telegram?.WebApp;
 const SALE = C.SALE_PRICE, HORIZON = C.HORIZON, AMBER = C.AMBER, TARGET = C.TARGET;
-const CAT = {sale:"По 1,50 €", water:"Вода · бесплатно", snack:"Снеки · бесплатно", shared:"Общие · не продаются"};
+const CAT = {sale:"По 1,50 €", water:"Вода · бесплатно", snack:"Снеки · бесплатно", shared:"Другое · на полках"};
 const catName = c => CAT[c] || "Прочее";
 const CATS = ["sale","water","snack","shared"];
 const isFree = c => c === "water" || c === "snack";   // купили и раздали — деньги не вернутся
@@ -290,7 +290,7 @@ function renderBuy(M){
     <div class="field"><label for="buyWho">Кто купил</label><input id="buyWho" value="${esc(S.f.buyWho||"")}" placeholder="имя"></div></div>
   <details class="panel pad" style="margin-top:16px"><summary style="cursor:pointer;font-weight:600">+ Новый напиток</summary><div class="stack" style="margin-top:14px">
     <div class="fields"><div class="field"><label for="npName">Название</label><input id="npName" placeholder="Birell 0,0%"></div><div class="field"><label for="npVol">Объём</label><input id="npVol" placeholder="0,5 л, стекло"></div></div>
-    <div class="fields"><div class="field"><label for="npCat">Категория</label><select id="npCat"><option value="sale">По 1,50 €</option><option value="water">Вода</option><option value="snack">Снеки</option><option value="shared">Общие, не продаются</option></select></div>
+    <div class="fields"><div class="field"><label for="npCat">Категория</label><select id="npCat"><option value="sale">По 1,50 €</option><option value="water">Вода</option><option value="snack">Снеки</option><option value="shared">Другое, на полках</option></select></div>
     <div class="field"><label for="npShape">Тара</label><select id="npShape"><option value="bottle">Стекло</option><option value="can">Банка</option><option value="pet">ПЭТ</option><option value="water">Вода</option><option value="capsule">Капсула</option></select></div></div>
     <div class="fields"><div class="field"><label for="npCost">Закупка за шт, €</label><input id="npCost" inputmode="decimal"></div><div class="field"><label for="npPack">Упаковка, шт</label><input id="npPack" inputmode="numeric" value="6"></div>
     <div class="field"><label for="npDep">Залог, €</label><input id="npDep" inputmode="decimal" value="0,15"></div>

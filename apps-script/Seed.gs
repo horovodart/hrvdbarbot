@@ -1,6 +1,6 @@
 /* Справочник товаров, команда и стартовые данные. */
 
-var SEED_VERSION = 14;
+var SEED_VERSION = 15;
 
 var SEED_RETIRE = {
   "returns": ["r-2026-08-15", "r-2026-07-21"]   // августовские 17,25 € вошли в эту запись, отдельной строкой не нужны
@@ -371,7 +371,7 @@ var SEED = {
       "note": "Metro 22.07: 1,74 € без НДС, +23% = 2,14 €.",
       "order": 20,
       "pack": 6,
-      "phaseout": false,
+      "phaseout": true,
       "shape": "pet",
       "vol": "2 л"
     },
@@ -386,7 +386,7 @@ var SEED = {
       "note": "Цена принята как у обычной 2 л — в чеке 22.07 её не было.",
       "order": 21,
       "pack": 6,
-      "phaseout": false,
+      "phaseout": true,
       "shape": "pet",
       "vol": "2 л"
     },
@@ -506,7 +506,7 @@ var SEED = {
       "note": "Metro 22.07: 1,43 € без НДС, +23% = 1,75 €. Была акция «Kofola за 1 €».",
       "order": 22,
       "pack": 6,
-      "phaseout": false,
+      "phaseout": true,
       "shape": "pet",
       "vol": "2 л"
     },
@@ -641,7 +641,7 @@ var SEED = {
       "note": "Maresi. Плюс 2 открытые на 20.09 — не считаются.",
       "order": 25,
       "pack": null,
-      "phaseout": false,
+      "phaseout": true,
       "shape": "pet",
       "vol": "Maresi Original · закрытые"
     },
@@ -669,7 +669,7 @@ var SEED = {
       "name": "Staropramen",
       "order": 24,
       "pack": 6,
-      "phaseout": false,
+      "phaseout": true,
       "shape": "pet",
       "vol": "1,5 л · ПЭТ · 4%"
     },
@@ -774,7 +774,7 @@ var SEED = {
       "name": "Kinley Tonic",
       "order": 23,
       "pack": 6,
-      "phaseout": false,
+      "phaseout": true,
       "shape": "pet",
       "vol": "1,5 л"
     },

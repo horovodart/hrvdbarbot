@@ -13,17 +13,38 @@ window.API = (function(){
   const readLocal = () => { try { return JSON.parse(localStorage.getItem(LS)) || null } catch(e){ return null } };
   const writeLocal = d => { try { localStorage.setItem(LS, JSON.stringify(d)) } catch(e){} };
 
-  async function post(action, payload){
-    if(!live()) return demo(action, payload);
+  // Apps Script отвечает через перенаправление, и изредка оттуда прилетает пустое
+  // тело или HTML-заглушка Google вместо JSON. Один такой сбой не должен выглядеть
+  // как поломка склада, поэтому пробуем ещё пару раз.
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+
+  async function once(action, payload){
     const r = await fetch(C.API, {
       method:"POST",
       headers:{"Content-Type":"text/plain;charset=utf-8"}, // simple request — без preflight
       body: JSON.stringify({ action, payload, initData: TG?.initData || "" })
     });
     if(!r.ok) throw new Error("HTTP "+r.status);
-    const j = await r.json();
+    const t = await r.text();
+    let j;
+    try { j = JSON.parse(t) }
+    catch(e){ const err = new Error("Сервер ответил не по делу"); err.retry = true; throw err }
     if(!j.ok) throw new Error(j.error || "Ошибка сервера");
     return j.data;
+  }
+
+  async function post(action, payload){
+    if(!live()) return demo(action, payload);
+    let last;
+    for(let i = 0; i < 3; i++){
+      try { return await once(action, payload) }
+      catch(e){
+        // ошибку по делу («нет в списке команды») повторять бессмысленно
+        if(!e.retry && !(e instanceof TypeError)) throw e;
+        last = e; await wait(600 * (i+1));
+      }
+    }
+    throw last;
   }
 
   /* ---- демо-режим: то же API, но поверх локального файла ---- */

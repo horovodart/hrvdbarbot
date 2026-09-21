@@ -294,7 +294,7 @@
       "note": "Metro 22.07: 1,74 € без НДС, +23% = 2,14 €.",
       "order": 20,
       "pack": 6,
-      "phaseout": false,
+      "phaseout": true,
       "shape": "pet",
       "vol": "2 л"
     },
@@ -309,7 +309,7 @@
       "note": "Цена принята как у обычной 2 л — в чеке 22.07 её не было.",
       "order": 21,
       "pack": 6,
-      "phaseout": false,
+      "phaseout": true,
       "shape": "pet",
       "vol": "2 л"
     },
@@ -429,7 +429,7 @@
       "note": "Metro 22.07: 1,43 € без НДС, +23% = 1,75 €. Была акция «Kofola за 1 €».",
       "order": 22,
       "pack": 6,
-      "phaseout": false,
+      "phaseout": true,
       "shape": "pet",
       "vol": "2 л"
     },
@@ -564,7 +564,7 @@
       "note": "Maresi. Плюс 2 открытые на 20.09 — не считаются.",
       "order": 25,
       "pack": null,
-      "phaseout": false,
+      "phaseout": true,
       "shape": "pet",
       "vol": "Maresi Original · закрытые"
     },
@@ -592,7 +592,7 @@
       "name": "Staropramen",
       "order": 24,
       "pack": 6,
-      "phaseout": false,
+      "phaseout": true,
       "shape": "pet",
       "vol": "1,5 л · ПЭТ · 4%"
     },
@@ -697,7 +697,7 @@
       "name": "Kinley Tonic",
       "order": 23,
       "pack": 6,
-      "phaseout": false,
+      "phaseout": true,
       "shape": "pet",
       "vol": "1,5 л"
     },
