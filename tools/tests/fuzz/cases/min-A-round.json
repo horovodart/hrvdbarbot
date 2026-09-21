@@ -1,0 +1,10 @@
+{
+  "_": "Минимальный пример: est ровно 0.5 → Math.round(0.5)=1 (приложение, зелёный) против round(0.5)=0 в Python (эталон, красный)",
+  "now": "2026-03-01T10:00:00.000Z",
+  "class": "round-half",
+  "data": {
+    "products": {"p": {"name":"Товар","cat":"sale","cost":1,"dep":0,"pack":null,"min":null,"phaseout":false}},
+    "counts":   {"c0": {"date":"2026-03-01T10:00:00.000Z","cash":0,"card":0,"stock":{"p":0.5}}},
+    "purchases":{}, "returns":{}
+  }
+}

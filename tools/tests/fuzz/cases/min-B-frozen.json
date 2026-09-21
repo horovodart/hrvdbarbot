@@ -1,0 +1,12 @@
+{
+  "_": "Минимальный пример: подсчёт с frozen — приложение подставляет замороженные цифры, reference.py про поле не знает",
+  "now": "2026-03-11T10:00:00.000Z",
+  "class": "frozen-ignored-by-reference",
+  "data": {
+    "products": {"p": {"name":"Товар","cat":"sale","cost":1,"dep":0,"pack":null,"min":null,"phaseout":false}},
+    "counts":   {"c0": {"date":"2026-03-01T10:00:00.000Z","cash":0,"card":0,"stock":{"p":10}},
+                 "c1": {"date":"2026-03-11T10:00:00.000Z","cash":6,"card":0,"stock":{"p":6},
+                        "frozen":{"costSale":99,"costWater":0,"depSpent":0,"price":1.0}}},
+    "purchases":{}, "returns":{}
+  }
+}

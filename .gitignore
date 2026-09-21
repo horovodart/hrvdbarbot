@@ -7,4 +7,7 @@ package-lock.json
 # clasp
 .clasprc.json
 __pycache__/
-tools/tests/
+# тесты живут в репозитории — на них завязаны deploy.sh и pre-push хук.
+# Не в репозитории только то, что они порождают на ходу:
+tools/tests/fuzz/cases/[0-9]*.json
+tools/tests/fuzz/.min.*.jsonl

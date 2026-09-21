@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Не пускает пуш, если тесты красные. Ставится: tools/hooks/install.sh
+# Обойти осознанно: git push --no-verify
+exec "$(git rev-parse --show-toplevel)/tools/test.sh" 300
