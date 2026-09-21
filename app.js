@@ -117,15 +117,19 @@ function model(){
                                 {units:0, amount:0});
   tare.last = S.returns.map(r => r.date).sort().pop() || null;
 
-  // выпито тары с депозитом с момента последней сдачи: закрытые периоды плюс оценка с последнего подсчёта
-  let waiting = 0;
+  // Залог в пустой таре = уплачено за всё выпитое с начала учёта минус то, что уже сдали.
+  // Так цифра сама себя правит: сдал — она упала ровно на сумму из автомата.
+  const start = counts[0]?.date || null;
+  let paid = 0;
   for(const p of S.products){
     const dep = +p.dep || 0; if(!dep) continue;
-    for(const r of recs) if(!tare.last || r.to.date > tare.last) waiting += Math.max(0, r.cons[p.id] || 0) * dep;
+    for(const r of recs) paid += Math.max(0, r.cons[p.id] || 0) * dep;
     const it = items[p.id];
-    if(it?.rate) waiting += it.rate * dSince * dep;
+    if(it?.rate) paid += it.rate * dSince * dep;          // с последнего подсчёта — по среднему расходу
   }
-  tare.waiting = waiting;
+  const back = S.returns.filter(r => !start || r.date > start).reduce((s,r) => s + (+r.amount||0), 0);
+  tare.waiting = Math.max(0, paid - back);
+  tare.paid = paid;
 
   return {counts, purch, recs, last, lastRec:recs[recs.length-1], items, dSince, tare};
 }
@@ -403,7 +407,7 @@ function tareSheet(M){
           ${M.tare.last ? `<dt>Последняя сдача</dt><dd>${ddmm(M.tare.last)}</dd>` : ""}
           <dt class="tot">Ждёт сдачи · примерно</dt><dd class="tot">${units(M.tare.waiting)} шт · ${eur(M.tare.waiting)}</dd>
         </dl>
-        <p class="note" style="margin:8px 0 0">«Ждёт сдачи» — залог за всё выпитое с последней сдачи. Цифра приблизительная: часть тары ещё стоит непустой, часть могли выбросить. Сверяется сама в момент следующей сдачи.</p>
+        <p class="note" style="margin:8px 0 0">«Ждёт сдачи» — залог за всё выпитое минус всё, что уже сдали. Цифра приблизительная: часть тары ещё стоит непустой, часть выбрасывают. Сверяется сама: сдал — она упала ровно на сумму из автомата.</p>
       </div>
       <div class="fields" style="margin-top:16px"><button class="btn ghost" id="tClose" style="flex:1">Закрыть</button><button class="btn" id="tSave" style="flex:1">Записать</button></div>
     </div></div>`;
