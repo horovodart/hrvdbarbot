@@ -41,8 +41,8 @@ header.top.stuck::after{opacity:1}
 .chip[aria-pressed="true"] .n{color:rgba(255,255,255,.6)}
 
 /* ---------- секции и сетка ---------- */
-h2.sec{font:600 12px/1 var(--display);text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);margin:24px 0 12px;display:flex;justify-content:space-between;align-items:baseline;gap:10px}
-h2.sec em{font:500 12px var(--body);text-transform:none;letter-spacing:0;font-style:normal;color:var(--ink-3)}
+.sec{font:600 12px/1 var(--display);text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);margin:24px 0 12px;display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.sec em{font:500 12px var(--body);text-transform:none;letter-spacing:0;font-style:normal;color:var(--ink-3)}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 @media (min-width:540px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 
@@ -180,3 +180,10 @@ svg.fb{display:none}
 .chk{display:flex;gap:10px;align-items:flex-start;margin-top:14px;cursor:pointer;font-size:13.5px;line-height:1.4}
 .chk input{width:20px;height:20px;flex:none;accent-color:var(--accent);margin:1px 0 0}
 .chk b{font-weight:600}
+
+/* свёрнутая секция «общие» */
+button.sec{width:100%;background:none;border:0;padding:0;cursor:pointer;align-items:center}
+button.sec em{display:flex;align-items:center;gap:4px}
+button.sec svg{width:16px;height:16px;transition:transform .18s}
+button.sec[aria-expanded="true"] svg{transform:rotate(180deg)}
+button.sec:active{opacity:.6}

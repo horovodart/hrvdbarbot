@@ -5,7 +5,7 @@ const SALE = C.SALE_PRICE, HORIZON = C.HORIZON, AMBER = C.AMBER, TARGET = C.TARG
 const CAT = {sale:"По 1,50 €", water:"Вода · бесплатно", snack:"Снеки · бесплатно", shared:"Общие · не продаются"};
 const CATS = ["sale","water","snack","shared"];
 const isFree = c => c === "water" || c === "snack";   // купили и раздали — деньги не вернутся
-const S = {products:[], counts:[], purchases:[], returns:[], tab:"menu", filter:"all", buy:{}, count:null, f:{}, M:null, loaded:false};
+const S = {products:[], counts:[], purchases:[], returns:[], open:{}, tab:"menu", filter:"all", buy:{}, count:null, f:{}, M:null, loaded:false};
 
 const $  = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -192,7 +192,13 @@ function renderMenu(M){
     if(S.filter !== "all") ps = ps.filter(p => M.items[p.id].st === S.filter);
     ps = ps.filter(p => M.items[p.id].restock || Math.round(M.items[p.id].est) > 0);
     if(!ps.length) continue;
-    html += `<h2 class="sec">${CAT[cat]}<em>${ps.length} ${plural(ps.length,"позиция","позиции","позиций")}</em></h2><div class="grid">`;
+    const fold = cat === "shared";                       // общие свёрнуты, пока не откроешь
+    const open = !fold || S.open[cat];
+    html += fold
+      ? `<button class="sec fold" data-sec="${cat}" aria-expanded="${open}">${CAT[cat]}<em>${ps.length} ${plural(ps.length,"позиция","позиции","позиций")}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></em></button>`
+      : `<h2 class="sec">${CAT[cat]}<em>${ps.length} ${plural(ps.length,"позиция","позиции","позиций")}</em></h2>`;
+    if(!open) continue;
+    html += `<div class="grid">`;
     for(const p of ps){
       const it = M.items[p.id], out = Math.round(it.est) <= 0;
       html += `<button class="card ${out?"out":""}" data-p="${esc(p.id)}">
@@ -228,7 +234,8 @@ function renderBuy(M){
   if(!needs.length) h += `</div>`;
 
   h += `<h2 class="sec">Отметить закупку<em>плюсами — что купил</em></h2><div class="panel">`;
-  for(const cat of CATS) for(const p of all.filter(x=>x.cat===cat)){
+  // позиции на сбыт не докупаем — в списке закупки им делать нечего
+  for(const cat of CATS) for(const p of all.filter(x => x.cat===cat && !x.phaseout)){
     h += `<div class="row"><div class="mini">${pic(p)}</div><div class="info"><div class="nm">${esc(p.name)}</div>
       <div class="sub2">${esc(p.vol||"")}${p.pack?" · упак. "+p.pack:""}</div></div>${stepper(p.id, S.buy[p.id]||0, "b")}</div>`;
   }
@@ -250,10 +257,12 @@ function renderBuy(M){
 /* ---------- подсчёт ---------- */
 function renderCount(M){
   const all = sorted();
-  if(!S.count){ S.count = {}; for(const p of all) S.count[p.id] = Math.round(M.items[p.id].est) }
+  if(!S.count){ S.count = {}; for(const p of all) if(M.items[p.id].restock || Math.round(M.items[p.id].est) > 0) S.count[p.id] = Math.round(M.items[p.id].est) }
   let h = `<h2 class="sec">Подсчёт раз в 2 недели<em>${M.last ? "прошлый "+ddmm(M.last.date)+" · "+Math.floor(M.dSince)+" дн. назад" : ""}</em></h2>
     <p class="note" style="margin:0 0 12px">Посчитай холодильник и полки вместе. Поля заполнены расчётом — поправь на то, что видишь.</p><div class="panel">`;
-  for(const cat of CATS) for(const p of all.filter(x=>x.cat===cat)){
+  // кончившееся на сбыте не переспрашиваем: понадобится — заведут заново
+  const countable = p => M.items[p.id].restock || Math.round(M.items[p.id].est) > 0;
+  for(const cat of CATS) for(const p of all.filter(x => x.cat===cat && countable(x))){
     const it = M.items[p.id];
     h += `<div class="row"><div class="mini">${pic(p)}</div><div class="info"><div class="nm">${esc(p.name)}</div>
       <div class="sub2 num">было ${it.base ?? "—"}${it.bought?" + куплено "+it.bought:""}</div></div>${stepper(p.id, S.count[p.id] ?? 0, "c")}</div>`;
@@ -495,6 +504,7 @@ document.addEventListener("click", async e => {
   const t = e.target.closest("[data-tab]");
   if(t){ S.tab = t.dataset.tab; document.querySelectorAll(".tab").forEach(x => x.setAttribute("aria-selected", x === t)); if(S.tab === "count") S.count = null; haptic("light"); render(); scrollTo(0,0); return }
   const f = e.target.closest("[data-f]"); if(f){ S.filter = f.dataset.f; haptic("light"); render(); return }
+  const sc = e.target.closest("[data-sec]"); if(sc){ S.open[sc.dataset.sec] = !S.open[sc.dataset.sec]; haptic("light"); render(); return }
   const c = e.target.closest(".card[data-p]"); if(c){ const p = S.products.find(x => x.id === c.dataset.p); if(p) sheet(p); return }
   if(e.target.closest("#moneyCard")){ moneySheet(S.M.lastRec); return }
   if(e.target.id === "tareBtn"){ tareSheet(S.M); return }
@@ -534,7 +544,8 @@ async function saveBuy(){
   }catch(e){ toast("Не сохранилось: "+e.message); b.disabled = false }
 }
 async function saveCount(){
-  const stock = {}; for(const p of sorted()) stock[p.id] = S.count[p.id] || 0;
+  // в подсчёт попадает только то, что показывали: нулевой сбыт не воскрешаем
+  const stock = {}; for(const p of sorted()) if(S.count[p.id] != null) stock[p.id] = S.count[p.id];
   const b = $("#dockBtn"); b.disabled = true;
   try{
     await apply(API.addCount({date:new Date().toISOString(), stock, cash:num($("#cCash").value), card:num($("#cCard").value), by:$("#cWho").value.trim()||null}));
