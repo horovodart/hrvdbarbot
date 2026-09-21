@@ -2,8 +2,8 @@
 (function(){
 const C = window.HUB_CONFIG, TG = window.Telegram?.WebApp;
 const SALE = C.SALE_PRICE, HORIZON = C.HORIZON, AMBER = C.AMBER, TARGET = C.TARGET;
-const CAT = {sale:"По 1,50 €", free:"Вода · бесплатно", shared:"Общие · не продаются"};
-const S = {products:[], counts:[], purchases:[], tab:"menu", filter:"all", buy:{}, count:null, f:{}, M:null, loaded:false};
+const CAT = {sale:"По 1,50 €", free:"Бесплатно · вода и снеки", shared:"Общие · не продаются"};
+const S = {products:[], counts:[], purchases:[], returns:[], tab:"menu", filter:"all", buy:{}, count:null, f:{}, M:null, loaded:false};
 
 const $  = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -56,8 +56,12 @@ function model(){
       }
       depSpent += (bought[p.id]||0) * (+p.dep || 0);
     }
-    const expected = saleUnits*SALE, got = (+b.cash||0) + (+b.card||0);
-    recs.push({id:b.id, from:a, to:b, days:days(a.date,b.date), cons, meas, bought, saleUnits, freeUnits,
+    // возврат залога, легший в кассу, — это не донаты за напитки
+    const backed = S.returns.filter(r => r.toTill && r.date > a.date && r.date <= b.date)
+                            .reduce((s,r) => s + (+r.amount||0), 0);
+    const buys = purch.filter(x => x.date > a.date && x.date <= b.date).length;
+    const expected = saleUnits*SALE, got = (+b.cash||0) + (+b.card||0) - backed;
+    recs.push({id:b.id, from:a, to:b, days:days(a.date,b.date), cons, meas, bought, saleUnits, freeUnits, backed, buys,
       expected, got, short: got-expected, costSale, costWater, depSpent,
       net: got - costSale - costWater,          // реальный итог: пришло минус всё, что купили
       ideal: expected - costSale - costWater,   // если бы платили все
@@ -108,7 +112,9 @@ function model(){
 
     items[p.id] = {est, exact, estimated, rate, daysLeft, st, need, restock, periods, bought:since[p.id]||0, base};
   }
-  return {counts, purch, recs, last, lastRec:recs[recs.length-1], items, dSince};
+  const tare = S.returns.reduce((o,r) => ({bottles:o.bottles+(+r.bottles||0), cans:o.cans+(+r.cans||0),
+                                            amount:o.amount+(+r.amount||0)}), {bottles:0,cans:0,amount:0});
+  return {counts, purch, recs, last, lastRec:recs[recs.length-1], items, dSince, tare};
 }
 
 /* ---------- меню ---------- */
@@ -135,15 +141,17 @@ function money(r){
   return `<dl class="recon num">
       <dt>Выпито платных</dt><dd>${r.saleUnits} шт</dd>
       <dt>Должно быть (× ${eur(SALE)})</dt><dd>${eur(r.expected)}</dd>
-      <dt>Пришло: касса + карта</dt><dd>${eur(r.got)}</dd>
+      <dt>Пришло за напитки</dt><dd>${eur(r.got)}</dd>
+      ${r.backed ? `<dt>вычтен возврат залога</dt><dd>−${eur(r.backed)}</dd>` : ""}
       <dt class="tot">Недобор</dt><dd class="tot ${r.short>=0?"pos":"neg"}">${r.short>0?"+":""}${eur(r.short)}${pct!=null?" · оплачено "+pct+"%":""}</dd>
     </dl>
     <dl class="recon num" style="margin-top:12px">
       <dt>Закупка выпитого</dt><dd>−${eur(r.costSale)}</dd>
-      <dt>Вода · ${r.freeUnits} шт · отбивки нет</dt><dd>−${eur(r.costWater)}</dd>
+      <dt>Бесплатное · ${r.freeUnits} шт · отбивки нет</dt><dd>−${eur(r.costWater)}</dd>
       <dt class="tot">Итог периода</dt><dd class="tot ${r.net>=0?"pos":"neg"}">${r.net>0?"+":""}${eur(r.net)}</dd>
     </dl>
-    <p class="note" style="margin:10px 0 0">Если бы платили все — ${r.ideal>0?"+":""}${eur(r.ideal)}. ${be!=null?`В ноль выходим при ${be}% оплаты.`:""}${r.depSpent?" Залога за тару ушло "+eur(r.depSpent)+" — вернётся при сдаче.":""}</p>`;
+    <p class="note" style="margin:10px 0 0">Если бы платили все — ${r.ideal>0?"+":""}${eur(r.ideal)}. ${be!=null?`В ноль выходим при ${be}% оплаты.`:""}${r.depSpent?" Залога за тару ушло "+eur(r.depSpent)+" — вернётся при сдаче.":""}</p>
+    ${r.buys != null ? `<p class="note" style="margin:6px 0 0">За период отмечено закупок: ${r.buys}. Если какая-то не отмечена, выпито посчитается меньше, а недобор выйдет больше настоящего.</p>` : ""}`;
 }
 
 function renderMenu(M){
@@ -205,7 +213,9 @@ function renderBuy(M){
     h += `<div class="row"><div class="mini">${pic(p)}</div><div class="info"><div class="nm">${esc(p.name)}</div>
       <div class="sub2">${esc(p.vol||"")}${p.pack?" · упак. "+p.pack:""}</div></div>${stepper(p.id, S.buy[p.id]||0, "b")}</div>`;
   }
-  h += `</div><div class="fields" style="margin-top:12px">
+  h += `</div>
+  <button class="btn ghost" id="tareBtn" style="margin-top:12px">Сдал тару · всего ${M.tare.bottles + M.tare.cans} шт на ${eur(M.tare.amount)}</button>
+  <div class="fields" style="margin-top:12px">
     <div class="field"><label for="buySum">Сумма чека, €</label><input id="buySum" value="${esc(S.f.buySum||"")}" inputmode="decimal" placeholder="например 97,48"></div>
     <div class="field"><label for="buyWho">Кто купил</label><input id="buyWho" value="${esc(S.f.buyWho||"")}" placeholder="имя"></div></div>
   <details class="panel pad" style="margin-top:16px"><summary style="cursor:pointer;font-weight:600">+ Новый напиток</summary><div class="stack" style="margin-top:14px">
@@ -359,6 +369,55 @@ function sheet(p){
   };
 }
 
+function tareSheet(M){
+  const st = {bottles:0, cans:0, toTill:true};
+  const bg = document.createElement("div");
+  bg.className = "sheet-bg";
+  const step = (k,l) => `<div class="row"><div class="info"><div class="nm">${l}</div><div class="sub2">${eur(C.DEPOSIT)} за штуку</div></div>
+    <div class="step"><button type="button" data-t="${k}" data-d="-1">−</button><input id="t-${k}" inputmode="numeric" value="0" class="num" data-t="${k}"><button type="button" class="plus" data-t="${k}" data-d="1">+</button></div></div>`;
+  bg.innerHTML = `<div class="sheet" role="dialog" aria-label="Сдача тары">
+    <div class="grab"><i></i></div>
+    <div class="body">
+      <h3>Сдал тару</h3>
+      <div class="meta">Автомат в магазине принял — отметь, сколько и на сколько</div>
+      <div class="panel" style="margin-top:14px">${step("bottles","Бутылки")}${step("cans","Банки")}</div>
+      <div class="fields" style="margin-top:12px">
+        <div class="field"><label for="tSum">Получено, €</label><input id="tSum" inputmode="decimal" value="0,00"></div>
+        <div class="field"><label for="tWho">Кто сдавал</label><input id="tWho" placeholder="имя"></div>
+      </div>
+      <label class="chk"><input type="checkbox" id="tTill" checked><span><b>Деньги положил в кассу</b> — тогда приложение не посчитает их донатами за напитки</span></label>
+      <div class="blk"><h4>За всё время</h4>
+        <dl class="recon num"><dt>Бутылок сдано</dt><dd>${M.tare.bottles} шт</dd>
+        <dt>Банок сдано</dt><dd>${M.tare.cans} шт</dd>
+        <dt class="tot">Вернулось залога</dt><dd class="tot pos">${eur(M.tare.amount)}</dd></dl></div>
+      <div class="fields" style="margin-top:16px"><button class="btn ghost" id="tClose" style="flex:1">Закрыть</button><button class="btn" id="tSave" style="flex:1">Записать</button></div>
+    </div></div>`;
+  document.body.appendChild(bg);
+  const close = () => { bg.remove(); TG?.BackButton?.hide() };
+  TG?.BackButton?.show(); TG?.BackButton?.onClick(close);
+  bg.addEventListener("click", e => { if(e.target === bg) close() });
+  const sum = () => { bg.querySelector("#tSum").value = ((st.bottles+st.cans)*C.DEPOSIT).toFixed(2).replace(".",",") };
+  bg.addEventListener("click", e => {
+    const b = e.target.closest("[data-t][data-d]"); if(!b) return;
+    const k = b.dataset.t; st[k] = Math.max(0, st[k] + (+b.dataset.d));
+    bg.querySelector("#t-"+k).value = st[k]; sum(); haptic("light");
+  });
+  bg.addEventListener("input", e => {
+    if(e.target.dataset?.t){ st[e.target.dataset.t] = Math.max(0, parseInt(e.target.value)||0); sum() }
+  });
+  bg.querySelector("#tClose").onclick = close;
+  bg.querySelector("#tSave").onclick = async () => {
+    if(!st.bottles && !st.cans){ toast("Отметь, сколько сдал"); return }
+    const btn = bg.querySelector("#tSave"); btn.disabled = true;
+    try{
+      await apply(API.addReturn({date:new Date().toISOString(), bottles:st.bottles, cans:st.cans,
+        amount:num(bg.querySelector("#tSum").value), toTill:bg.querySelector("#tTill").checked,
+        by:bg.querySelector("#tWho").value.trim()||null}));
+      toast("Записал сдачу тары"); haptic("medium"); close();
+    }catch(e){ toast("Не сохранилось: "+e.message); btn.disabled = false }
+  };
+}
+
 function moneySheet(r){
   if(!r) return;
   const bg = document.createElement("div");
@@ -369,10 +428,16 @@ function moneySheet(r){
       <h3>Деньги за период</h3>
       <div class="meta">${ddmm(r.from.date)} – ${ddmm(r.to.date)} · ${Math.round(r.days)} дн.</div>
       <div style="margin-top:16px">${money(r)}</div>
+      <div class="blk"><h4>Куда ушли деньги на бесплатное</h4>
+        <dl class="recon num">${S.products.filter(p => p.cat==="free" && r.cons[p.id] > 0)
+          .sort((x,y) => (r.cons[y.id]*(y.cost||0)) - (r.cons[x.id]*(x.cost||0)))
+          .map(p => `<dt>${esc(p.name)} ${esc(p.vol||"")} · ${r.cons[p.id]} шт</dt><dd>${p.cost?eur(r.cons[p.id]*p.cost):"—"}</dd>`)
+          .join("") || "<dt>ничего не выпито</dt><dd>—</dd>"}</dl></div>
       <div class="blk"><h4>Как это считается</h4><p class="note" style="margin:0">
         Недобор — только по платным напиткам: сколько должны были занести против того, что занесли.
         Вода бесплатная, деньги за неё не вернутся никогда, поэтому она стоит отдельной строкой расхода, а не в недоборе.
-        Залог за тару в расход не идёт — это возвратные деньги, они лежат в пустой таре.</p></div>
+        Залог за тару в расход не идёт — это возвратные деньги, они лежат в пустой таре:
+        если сдачу тары отметить во вкладке «Закупка», её сумма вычтется из кассы и не сойдёт за донаты.</p></div>
       <button class="btn ghost" id="mClose" style="margin-top:16px">Закрыть</button>
     </div></div>`;
   document.body.appendChild(bg);
@@ -406,7 +471,7 @@ function dock(){
   else d.hidden = true;
 }
 function toast(t){ const e = document.createElement("div"); e.className = "toast"; e.textContent = t; document.body.appendChild(e); setTimeout(()=>e.remove(), 2400) }
-async function apply(promise){ const d = await promise; S.products = d.products; S.counts = d.counts; S.purchases = d.purchases; render(); return d }
+async function apply(promise){ const d = await promise; S.products = d.products; S.counts = d.counts; S.purchases = d.purchases; S.returns = d.returns || []; render(); return d }
 
 /* ---------- события ---------- */
 document.addEventListener("click", async e => {
@@ -415,8 +480,10 @@ document.addEventListener("click", async e => {
   const f = e.target.closest("[data-f]"); if(f){ S.filter = f.dataset.f; haptic("light"); render(); return }
   const c = e.target.closest(".card[data-p]"); if(c){ const p = S.products.find(x => x.id === c.dataset.p); if(p) sheet(p); return }
   if(e.target.closest("#moneyCard")){ moneySheet(S.M.lastRec); return }
+  if(e.target.id === "tareBtn"){ tareSheet(S.M); return }
   const s = e.target.closest(".step button");
-  if(s){ const inp = s.parentElement.querySelector("input"), v = Math.max(0,(parseInt(inp.value)||0) + (+s.dataset.d)); inp.value = v; setVal(inp.dataset.k, s.dataset.id, v); haptic("light"); return }
+  // счётчики внутри шторок обслуживают себя сами
+  if(s && !s.closest(".sheet-bg")){ const inp = s.parentElement.querySelector("input"), v = Math.max(0,(parseInt(inp.value)||0) + (+s.dataset.d)); inp.value = v; setVal(inp.dataset.k, s.dataset.id, v); haptic("light"); return }
   if(e.target.id === "fillNeed"){ for(const p of S.products){ const n = S.M.items[p.id]?.need; if(n) S.buy[p.id] = n } render(); toast("Список перенесён — поправь по чеку"); return }
   if(e.target.id === "refresh"){ e.target.classList.add("spin"); try{ await apply(API.list()); toast("Обновлено") }catch(err){ toast("Не вышло: "+err.message) } e.target.classList.remove("spin"); return }
   const d = e.target.closest("[data-del]");
@@ -476,7 +543,7 @@ async function addProduct(){
   try{ TG?.ready(); TG?.expand(); TG?.setHeaderColor?.("#FFFFFF"); TG?.setBackgroundColor?.("#FFFFFF"); TG?.disableVerticalSwipes?.() }catch(e){}
   try{
     const d = await API.list();
-    S.products = d.products; S.counts = d.counts; S.purchases = d.purchases; S.loaded = true;
+    S.products = d.products; S.counts = d.counts; S.purchases = d.purchases; S.returns = d.returns || []; S.loaded = true;
     if(!API.live()) $("#sub").dataset.demo = "1";
     render();
     if(!API.live()) toast("Демо-режим: правки живут только в этом браузере");

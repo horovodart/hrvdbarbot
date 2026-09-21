@@ -37,6 +37,7 @@ window.API = (function(){
     const d = await base();
     if(action === "list") return d;
     if(action === "addPurchase")  d.purchases[uid("p")] = p;
+    if(action === "addReturn")    (d.returns ||= {})[uid("r")] = p;
     if(action === "addCount")     d.counts[uid("c")] = p;
     if(action === "addProduct")   d.products[p.id] = p.data;
     if(action === "updateProduct")Object.assign(d.products[p.id] ||= {}, p.patch);
@@ -49,6 +50,7 @@ window.API = (function(){
     products:  Object.entries(d.products  || {}).map(([id,v]) => ({id, ...v})),
     counts:    Object.entries(d.counts    || {}).map(([id,v]) => ({id, ...v})),
     purchases: Object.entries(d.purchases || {}).map(([id,v]) => ({id, ...v})),
+    returns:   Object.entries(d.returns   || {}).map(([id,v]) => ({id, ...v})),
     live: live()
   });
 
@@ -56,6 +58,7 @@ window.API = (function(){
     live,
     async list(){ return norm(await post("list")) },
     async addPurchase(x){ return norm(await post("addPurchase", x)) },
+    async addReturn(x){ return norm(await post("addReturn", x)) },
     async addCount(x){ return norm(await post("addCount", x)) },
     async addProduct(id, data){ return norm(await post("addProduct", {id, data})) },
     async updateProduct(id, patch){ return norm(await post("updateProduct", {id, patch})) },
