@@ -767,6 +767,49 @@ test('list не трогает лист team, когда синкать нече
   assert.equal(team.length, 0, 'обращений к team быть не должно, а было: ' + team.join(', '));
 });
 
+test('повторное чтение берётся из кэша и не открывает таблицу', () => {
+  const { env, api } = readyApp();
+  api.handle('list', {}, { id: '1', name: 'Миша' });      // первый раз — из листа
+  env.stats.reset();
+  const out = api.handle('list', {}, { id: '1', name: 'Миша' });
+  assert.equal(env.stats.total, 0, 'второе чтение не должно трогать листы, а было: ' + env.stats.log.slice(0,6).join(', '));
+  assert.equal(Object.keys(out.products).length, 51, 'из кэша вернулся весь склад');
+  assert.equal(Object.keys(out.counts).length, 2, 'подсчёты тоже на месте');
+});
+
+test('кэш не подменяет типы: из него приходит то же, что из листа', () => {
+  const { env, api } = readyApp();
+  const fromSheet = api.handle('list', {}, { id: '1', name: 'Миша' });
+  const fromCache = api.handle('list', {}, { id: '1', name: 'Миша' });
+  assert.deepEqual(fromCache, fromSheet, 'кэш обязан отдавать ровно то же, иначе цифры разъедутся');
+});
+
+test('запись сбрасывает кэш — следующее чтение видит новое', () => {
+  const { api } = readyApp();
+  api.handle('list', {}, { id: '1', name: 'Миша' });      // прогрели кэш
+  api.handle('updateProduct', { id: 'aro05', patch: { cost: 42 } }, { id: '1', name: 'Миша' });
+  const after = api.handle('list', {}, { id: '1', name: 'Миша' });
+  assert.equal(after.products.aro05.cost, 42, 'после правки чтение обязано показать новую цену');
+});
+
+test('добавленный подсчёт виден сразу, а не через полторы минуты', () => {
+  const { api } = readyApp();
+  api.handle('list', {}, { id: '1', name: 'Миша' });
+  const before = Object.keys(api.handle('list', {}, { id: '1', name: 'Миша' }).counts).length;
+  api.handle('addCount', { date: '2026-10-01T10:00:00.000Z', cash: 10, card: 0, stock: { aro05: 5 } },
+             { id: '1', name: 'Миша' });
+  const after = api.handle('list', {}, { id: '1', name: 'Миша' }).counts;
+  assert.equal(Object.keys(after).length, before + 1, 'новый подсчёт должен быть в ближайшем же чтении');
+});
+
+test('fresh:true обходит кэш и перечитывает лист', () => {
+  const { env, api } = readyApp();
+  api.handle('list', {}, { id: '1', name: 'Миша' });
+  env.stats.reset();
+  api.handle('list', { fresh: true }, { id: '1', name: 'Миша' });
+  assert.ok(env.stats.total > 0, 'кнопка «обновить» обязана идти в таблицу, а не в кэш');
+});
+
 test('производительность: обращений к листу на один list', () => {
   const { env, api } = readyApp();
   env.stats.reset();

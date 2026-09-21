@@ -249,6 +249,16 @@ export function makeEnv(opts = {}) {
   };
   const LockService = { getScriptLock: () => lockObj, getDocumentLock: () => lockObj };
 
+  /* CacheService: хранилище в памяти + счётчики, чтобы тесты видели попадания */
+  const cacheStore = new Map();
+  const cacheCalls = { get: 0, put: 0, remove: 0, hits: 0 };
+  const cacheObj = {
+    get(k) { cacheCalls.get++; const v = cacheStore.has(k) ? cacheStore.get(k) : null; if (v != null) cacheCalls.hits++; return v },
+    put(k, v, ttl) { cacheCalls.put++; cacheStore.set(k, String(v)); return null },
+    remove(k) { cacheCalls.remove++; cacheStore.delete(k); return null }
+  };
+  const CacheService = { getScriptCache: () => cacheObj, getUserCache: () => cacheObj, getDocumentCache: () => cacheObj };
+
   const Utilities = {
     newBlob(s) { return { getBytes: () => signed(bytes(s)), getDataAsString: () => String(s) }; },
     computeHmacSha256Signature(value, key) {
@@ -275,8 +285,8 @@ export function makeEnv(opts = {}) {
   const Logger = { log: (m) => logs.push(String(m)) };
 
   return {
-    stats, book, props, lockCalls, outputs, logs,
-    globals: { SpreadsheetApp, PropertiesService, LockService, Utilities, ContentService, Logger },
+    stats, book, props, lockCalls, cacheCalls, cacheStore, outputs, logs,
+    globals: { SpreadsheetApp, PropertiesService, LockService, CacheService, Utilities, ContentService, Logger },
     sheet: (n) => book.sheets[n],
     dump: (n) => (book.sheets[n] ? book.sheets[n].dump() : null)
   };
@@ -295,7 +305,7 @@ function topLevelNames(src) {
 }
 const NAMES = [...new Set([...topLevelNames(SEED_SRC), ...topLevelNames(CODE)])];
 
-const GLOBAL_NAMES = ['SpreadsheetApp', 'PropertiesService', 'LockService', 'Utilities', 'ContentService', 'Logger'];
+const GLOBAL_NAMES = ['SpreadsheetApp', 'PropertiesService', 'LockService', 'CacheService', 'Utilities', 'ContentService', 'Logger'];
 
 /**
  * Загружает серверный код на переданном окружении и возвращает все его

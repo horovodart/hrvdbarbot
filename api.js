@@ -86,7 +86,8 @@ window.API = (function(){
 
   return {
     live,
-    async list(){ return norm(await post("list")) },
+    // fresh — кнопка «обновить»: минуя кэш скрипта, прямо из таблицы
+    async list(fresh){ return norm(await post("list", fresh ? {fresh:true} : {})) },
     async addPurchase(x){ return norm(await post("addPurchase", x)) },
     async addReturn(x){ return norm(await post("addReturn", x)) },
     async addCount(x){ return norm(await post("addCount", x)) },

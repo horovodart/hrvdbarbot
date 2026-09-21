@@ -598,7 +598,7 @@ document.addEventListener("click", async e => {
   if(s && !s.closest(".sheet-bg")){ const inp = s.parentElement.querySelector("input"), v = Math.max(0,(parseInt(inp.value)||0) + (+s.dataset.d)); inp.value = v; setVal(inp.dataset.k, s.dataset.id, v); haptic("light"); return }
   if(e.target.closest("#fillNeed")){ for(const p of sorted()){ const n = S.M.items[p.id]?.need; if(n) S.buy[p.id] = n } render(); toast("Список перенесён — поправь по чеку"); return }
   const rf = e.target.closest("#refresh");
-  if(rf){ rf.classList.add("spin"); try{ await apply(API.list()); toast("Обновлено") }catch(err){ toast("Не вышло: "+err.message) } rf.classList.remove("spin"); return }
+  if(rf){ rf.classList.add("spin"); try{ await apply(API.list(true)); toast("Обновлено") }catch(err){ toast("Не вышло: "+err.message) } rf.classList.remove("spin"); return }
   const d = e.target.closest("[data-del]");
   if(d){ if(S.armed !== d.dataset.del){ S.armed = d.dataset.del; render(); return }
     const [col,id] = d.dataset.del.split("/");

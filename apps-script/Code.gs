@@ -126,9 +126,14 @@ function handle(action, p, user){
     // Замок нужен, только если чтение может что-то записать: первый запуск или
     // разъехавшийся сид. Иначе двое открывших приложение одновременно вставали в
     // очередь по 30 секунд — со стороны это выглядело как «грузится вечно».
-    if (!needSeed() && sheet('products').getLastRow() > 1) return listAll();
+    var fresh = !!(p && p.fresh);
+    if (!needSeed()) {
+      // попадание в кэш отвечает, вообще не открывая таблицу — проверяем его первым
+      if (!fresh) { var hit = cacheGet(); if (hit) return hit }
+      if (sheet('products').getLastRow() > 1) return listCached(true);
+    }
     lock.waitLock(30000);
-    try { return listAll() } finally { lock.releaseLock() }
+    try { dropListCache(); return listCached(true) } finally { lock.releaseLock() }
   }
   lock.waitLock(30000);
   try {
@@ -154,9 +159,35 @@ function handle(action, p, user){
       if (['products','counts','purchases','returns'].indexOf(p.col) < 0) throw new Error('Нельзя удалять из ' + p.col);
       remove(p.col, p.id);
     } else throw new Error('Неизвестное действие: ' + action);
-    return listAll();
+    dropListCache();
+    return listCached(true);
   } finally { lock.releaseLock() }
 }
+
+/* Склад в кэше скрипта.
+
+   Apps Script выполняет обращения к одному скрипту по очереди, и каждое чтение
+   складывается из восьми походов в таблицу — под одновременной нагрузкой это
+   давало до сорока секунд ожидания. Ответ у всех одинаковый, поэтому держим
+   его готовым: попадание в кэш отвечает, вообще не открывая таблицу.
+   Любая запись кэш сбрасывает, так что несвежих цифр команда не увидит. */
+var LIST_KEY = 'list-v1', LIST_TTL = 90, LIST_MAX = 90000;
+
+function cacheGet(){
+  try { var hit = CacheService.getScriptCache().get(LIST_KEY); return hit ? JSON.parse(hit) : null }
+  catch (e) { return null }   // битый кэш — просто читаем лист
+}
+
+function listCached(fresh){
+  if (!fresh) { var hit = cacheGet(); if (hit) return hit }
+  var cache = CacheService.getScriptCache();
+  var data = listAll();
+  // в кэш влезает 100 КБ; если склад перерос — просто живём без него
+  try { var s = JSON.stringify(data); if (s.length < LIST_MAX) cache.put(LIST_KEY, s, LIST_TTL) } catch (e) {}
+  return data;
+}
+
+function dropListCache(){ try { CacheService.getScriptCache().remove(LIST_KEY) } catch (e) {} }
 
 function listAll(){
   if (sheet('products').getLastRow() < 2) setup();   // первый запуск — заливаем стартовые данные сами
