@@ -112,8 +112,21 @@ function model(){
 
     items[p.id] = {est, exact, estimated, rate, daysLeft, st, need, restock, periods, bought:since[p.id]||0, base};
   }
-  const tare = S.returns.reduce((o,r) => ({bottles:o.bottles+(+r.bottles||0), cans:o.cans+(+r.cans||0),
-                                            amount:o.amount+(+r.amount||0)}), {bottles:0,cans:0,amount:0});
+  // сдача тары: сколько всего сдали и сколько залога ещё лежит в пустой таре
+  const tare = S.returns.reduce((o,r) => ({units:o.units+(+r.units||0), amount:o.amount+(+r.amount||0)}),
+                                {units:0, amount:0});
+  tare.last = S.returns.map(r => r.date).sort().pop() || null;
+
+  // выпито тары с депозитом с момента последней сдачи: закрытые периоды плюс оценка с последнего подсчёта
+  let waiting = 0;
+  for(const p of S.products){
+    const dep = +p.dep || 0; if(!dep) continue;
+    for(const r of recs) if(!tare.last || r.to.date > tare.last) waiting += Math.max(0, r.cons[p.id] || 0) * dep;
+    const it = items[p.id];
+    if(it?.rate) waiting += it.rate * dSince * dep;
+  }
+  tare.waiting = waiting;
+
   return {counts, purch, recs, last, lastRec:recs[recs.length-1], items, dSince, tare};
 }
 
@@ -214,7 +227,7 @@ function renderBuy(M){
       <div class="sub2">${esc(p.vol||"")}${p.pack?" · упак. "+p.pack:""}</div></div>${stepper(p.id, S.buy[p.id]||0, "b")}</div>`;
   }
   h += `</div>
-  <button class="btn ghost" id="tareBtn" style="margin-top:12px">Сдал тару · всего ${M.tare.bottles + M.tare.cans} шт на ${eur(M.tare.amount)}</button>
+  <button class="btn ghost" id="tareBtn" style="margin-top:12px">Сдал тару · ждёт сдачи ~${eur(M.tare.waiting)}</button>
   <div class="fields" style="margin-top:12px">
     <div class="field"><label for="buySum">Сумма чека, €</label><input id="buySum" value="${esc(S.f.buySum||"")}" inputmode="decimal" placeholder="например 97,48"></div>
     <div class="field"><label for="buyWho">Кто купил</label><input id="buyWho" value="${esc(S.f.buyWho||"")}" placeholder="имя"></div></div>
@@ -370,50 +383,48 @@ function sheet(p){
 }
 
 function tareSheet(M){
-  const st = {bottles:0, cans:0, toTill:true};
   const bg = document.createElement("div");
   bg.className = "sheet-bg";
-  const step = (k,l) => `<div class="row"><div class="info"><div class="nm">${l}</div><div class="sub2">${eur(C.DEPOSIT)} за штуку</div></div>
-    <div class="step"><button type="button" data-t="${k}" data-d="-1">−</button><input id="t-${k}" inputmode="numeric" value="0" class="num" data-t="${k}"><button type="button" class="plus" data-t="${k}" data-d="1">+</button></div></div>`;
+  const units = a => Math.round(a / C.DEPOSIT);
   bg.innerHTML = `<div class="sheet" role="dialog" aria-label="Сдача тары">
     <div class="grab"><i></i></div>
     <div class="body">
       <h3>Сдал тару</h3>
-      <div class="meta">Автомат в магазине принял — отметь, сколько и на сколько</div>
-      <div class="panel" style="margin-top:14px">${step("bottles","Бутылки")}${step("cans","Банки")}</div>
-      <div class="fields" style="margin-top:12px">
-        <div class="field"><label for="tSum">Получено, €</label><input id="tSum" inputmode="decimal" value="0,00"></div>
+      <div class="meta">Впиши, сколько выдал автомат — штуки посчитаю сам по ${eur(C.DEPOSIT)}</div>
+      <div class="fields" style="margin-top:16px">
+        <div class="field"><label for="tSum">Получено, €</label><input id="tSum" inputmode="decimal" placeholder="например 12,45"></div>
         <div class="field"><label for="tWho">Кто сдавал</label><input id="tWho" placeholder="имя"></div>
       </div>
+      <p class="note" id="tCalc" style="margin:10px 0 0">Это <b>0 шт</b> тары.</p>
       <label class="chk"><input type="checkbox" id="tTill" checked><span><b>Деньги положил в кассу</b> — тогда приложение не посчитает их донатами за напитки</span></label>
-      <div class="blk"><h4>За всё время</h4>
-        <dl class="recon num"><dt>Бутылок сдано</dt><dd>${M.tare.bottles} шт</dd>
-        <dt>Банок сдано</dt><dd>${M.tare.cans} шт</dd>
-        <dt class="tot">Вернулось залога</dt><dd class="tot pos">${eur(M.tare.amount)}</dd></dl></div>
+      <div class="blk"><h4>Тара</h4>
+        <dl class="recon num">
+          <dt>Сдано за всё время</dt><dd>${M.tare.units} шт · ${eur(M.tare.amount)}</dd>
+          ${M.tare.last ? `<dt>Последняя сдача</dt><dd>${ddmm(M.tare.last)}</dd>` : ""}
+          <dt class="tot">Ждёт сдачи · примерно</dt><dd class="tot">${units(M.tare.waiting)} шт · ${eur(M.tare.waiting)}</dd>
+        </dl>
+        <p class="note" style="margin:8px 0 0">«Ждёт сдачи» — залог за всё выпитое с последней сдачи. Цифра приблизительная: часть тары ещё стоит непустой, часть могли выбросить. Сверяется сама в момент следующей сдачи.</p>
+      </div>
       <div class="fields" style="margin-top:16px"><button class="btn ghost" id="tClose" style="flex:1">Закрыть</button><button class="btn" id="tSave" style="flex:1">Записать</button></div>
     </div></div>`;
   document.body.appendChild(bg);
   const close = () => { bg.remove(); TG?.BackButton?.hide() };
   TG?.BackButton?.show(); TG?.BackButton?.onClick(close);
   bg.addEventListener("click", e => { if(e.target === bg) close() });
-  const sum = () => { bg.querySelector("#tSum").value = ((st.bottles+st.cans)*C.DEPOSIT).toFixed(2).replace(".",",") };
-  bg.addEventListener("click", e => {
-    const b = e.target.closest("[data-t][data-d]"); if(!b) return;
-    const k = b.dataset.t; st[k] = Math.max(0, st[k] + (+b.dataset.d));
-    bg.querySelector("#t-"+k).value = st[k]; sum(); haptic("light");
-  });
-  bg.addEventListener("input", e => {
-    if(e.target.dataset?.t){ st[e.target.dataset.t] = Math.max(0, parseInt(e.target.value)||0); sum() }
+  const inp = bg.querySelector("#tSum");
+  inp.addEventListener("input", () => {
+    const n = units(num(inp.value));
+    bg.querySelector("#tCalc").innerHTML = `Это <b>${n}</b> ${plural(n,"штука","штуки","штук")} тары.`;
   });
   bg.querySelector("#tClose").onclick = close;
   bg.querySelector("#tSave").onclick = async () => {
-    if(!st.bottles && !st.cans){ toast("Отметь, сколько сдал"); return }
+    const amount = num(inp.value);
+    if(!amount){ toast("Впиши сумму"); return }
     const btn = bg.querySelector("#tSave"); btn.disabled = true;
     try{
-      await apply(API.addReturn({date:new Date().toISOString(), bottles:st.bottles, cans:st.cans,
-        amount:num(bg.querySelector("#tSum").value), toTill:bg.querySelector("#tTill").checked,
-        by:bg.querySelector("#tWho").value.trim()||null}));
-      toast("Записал сдачу тары"); haptic("medium"); close();
+      await apply(API.addReturn({date:new Date().toISOString(), amount, units:units(amount),
+        toTill:bg.querySelector("#tTill").checked, by:bg.querySelector("#tWho").value.trim()||null}));
+      toast(`Записал: ${units(amount)} шт на ${eur(amount)}`); haptic("medium"); close();
     }catch(e){ toast("Не сохранилось: "+e.message); btn.disabled = false }
   };
 }

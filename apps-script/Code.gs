@@ -15,11 +15,11 @@ var COLS = {
   products: ['id','name','vol','cat','shape','color','cap','cost','dep','pack','min','order','note','hidden','phaseout'],
   counts:   ['id','date','by','cash','card','initial','note','source','stock'],
   purchases:['id','date','by','total','source','items'],
-  returns:  ['id','date','by','bottles','cans','amount','toTill'],
+  returns:  ['id','date','by','amount','units','toTill','note'],
   team:     ['tg_id','name','role']
 };
 var JSON_FIELDS = {stock:1, items:1};
-var NUM_FIELDS  = {cost:1, dep:1, pack:1, min:1, order:1, cash:1, card:1, total:1, bottles:1, cans:1, amount:1};
+var NUM_FIELDS  = {cost:1, dep:1, pack:1, min:1, order:1, cash:1, card:1, total:1, amount:1, units:1};
 var BOOL_FIELDS = {hidden:1, initial:1, phaseout:1, toTill:1};
 
 /* ---------------- вход ---------------- */
@@ -107,8 +107,8 @@ function handle(action, p, user){
                         stock: p.stock || {}});
     } else if (action === 'addReturn'){
       insert('returns', {id: uid('r'), date: p.date || new Date().toISOString(), by: p.by || who,
-                         bottles: p.bottles || 0, cans: p.cans || 0, amount: p.amount || 0,
-                         toTill: !!p.toTill});
+                         amount: p.amount || 0, units: p.units || 0, toTill: !!p.toTill,
+                         note: p.note || null});
     } else if (action === 'addProduct'){
       if (!p.id) throw new Error('Нет id товара');
       var d = p.data || {}; d.id = p.id; insert('products', d);
@@ -124,7 +124,7 @@ function handle(action, p, user){
 
 function listAll(){
   if (sheet('products').getLastRow() < 2) setup();   // первый запуск — заливаем стартовые данные сами
-  else syncProducts();                                // новая версия справочника — обновляем только товары
+  else { syncProducts(); syncTeam() }                 // новая версия справочника — обновляем товары и команду
   var out = {};
   ['products','counts','purchases','returns'].forEach(function(name){
     var o = {};
@@ -235,7 +235,28 @@ function syncProducts(){
     Object.keys(o).forEach(function(k){ if (k !== 'phaseout') keep[k] = o[k] });
     patch('products', id, keep);
   });
+  ensureCols('returns');
+  syncTeam();
+  seedReturns();
   props.setProperty('SEED_VERSION', String(SEED_VERSION));
+}
+
+/** Историю сдачи тары до запуска приложения заносим один раз, из кода. */
+function seedReturns(){
+  if (typeof RETURNS_SEED === 'undefined') return;
+  var have = {};
+  rows('returns').forEach(function(r){ have[r.id] = true });
+  RETURNS_SEED.forEach(function(r){ if (!have[r.id]) insert('returns', r) });
+}
+
+/** Добавляет в лист «team» тех, кого ещё нет. Никого не удаляет. */
+function syncTeam(){
+  if (typeof TEAM_SEED === 'undefined') return;
+  var have = {};
+  rows('team').forEach(function(r){ have[String(r.tg_id).trim()] = true });
+  TEAM_SEED.forEach(function(m){
+    if (!have[String(m.id)]) insert('team', {tg_id: String(m.id), name: m.name, role: m.role || 'admin'});
+  });
 }
 
 /** Дописывает в шапку листа колонки, которых там ещё нет. Данные не сдвигает. */
