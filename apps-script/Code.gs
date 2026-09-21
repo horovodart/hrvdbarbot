@@ -93,9 +93,12 @@ function allowed(id, user){
 /* ---------------- действия ---------------- */
 
 function handle(action, p, user){
-  if (action === 'list') return listAll();
+  // list тоже под замком: иначе два одновременных запроса запускают синк дважды
   var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  lock.waitLock(30000);
+  if (action === 'list'){
+    try { return listAll() } finally { lock.releaseLock() }
+  }
   try {
     var who = user ? user.name : null;
     if (action === 'addPurchase'){
@@ -124,8 +127,7 @@ function handle(action, p, user){
 
 function listAll(){
   if (sheet('products').getLastRow() < 2) setup();   // первый запуск — заливаем стартовые данные сами
-  else { syncProducts(); syncTeam() }                 // новая версия справочника — обновляем товары и команду
-  try { ensureTriggers() } catch (e) { /* не критично: напоминание просто не встанет */ }
+  else { try { syncProducts(); syncTeam() } catch (e) { /* склад важнее синка справочника */ } }
   var out = {};
   ['products','counts','purchases','returns'].forEach(function(name){
     var o = {};
@@ -226,28 +228,53 @@ function syncProducts(){
   var props = PropertiesService.getScriptProperties();
   if (String(props.getProperty('SEED_VERSION')) === String(SEED_VERSION)) return;
   ensureCols('products');
-  var have = {};
-  rows('products').forEach(function(r){ have[r.id] = true });
-  Object.keys(SEED.products || {}).forEach(function(id){
-    var o = SEED.products[id]; o.id = id;
-    if (!have[id]) { insert('products', o); return }
-    // «распродаём» — решение команды, принятое в приложении: синком не сбрасываем
-    var keep = {};
-    Object.keys(o).forEach(function(k){ if (k !== 'phaseout') keep[k] = o[k] });
-    patch('products', id, keep);
+
+  // Лист переписывается целиком за одно чтение и одну запись: по ячейке выходило
+  // больше семисот обращений, запрос не укладывался в лимит и успевал записать
+  // половину дважды. Заодно схлопываем дубли по id, если они уже завелись.
+  var sh = sheet('products'), w = sh.getLastColumn(), last = sh.getLastRow();
+  var head = sh.getRange(1,1,1,w).getValues()[0];
+  var raw  = last > 1 ? sh.getRange(2,1,last-1,w).getValues() : [];
+  var col  = head.indexOf('id');
+
+  var grid = [], idx = {};
+  raw.forEach(function(r){
+    var id = String(r[col] || '').trim();
+    if (!id || idx[id] != null) return;          // пустые и повторы отбрасываем
+    idx[id] = grid.length; grid.push(r);
   });
+
+  Object.keys(SEED.products || {}).forEach(function(id){
+    var o = SEED.products[id], at = idx[id];
+    var row = at == null ? head.map(function(){ return '' }) : grid[at];
+    head.forEach(function(h,i){
+      if (h === 'id') { row[i] = id; return }
+      // «распродаём» — решение команды, принятое в приложении: синком не сбрасываем
+      if (h === 'phaseout' && at != null) return;
+      if (h in o) row[i] = cell('products', h, o[h]);
+    });
+    if (at == null){ idx[id] = grid.length; grid.push(row) }
+  });
+
+  if (grid.length) sh.getRange(2,1,grid.length,w).setValues(grid);
+  if (last - 1 > grid.length) sh.getRange(grid.length+2, 1, last-1-grid.length, w).clearContent();
+
   ensureCols('returns');
   syncTeam();
   seedReturns();
   props.setProperty('SEED_VERSION', String(SEED_VERSION));
 }
 
+
+
 /** Историю сдачи тары до запуска приложения заносим один раз, из кода. */
 function seedReturns(){
   if (typeof RETURNS_SEED === 'undefined') return;
   var have = {};
   rows('returns').forEach(function(r){ have[r.id] = true });
-  RETURNS_SEED.forEach(function(r){ if (!have[r.id]) insert('returns', r) });
+  RETURNS_SEED.forEach(function(r){
+    if (have[r.id]) patch('returns', r.id, r); else insert('returns', r);
+  });
 }
 
 /** Добавляет в лист «team» тех, кого ещё нет. Никого не удаляет. */
@@ -255,9 +282,11 @@ function syncTeam(){
   if (typeof TEAM_SEED === 'undefined') return;
   var have = {};
   rows('team').forEach(function(r){ have[String(r.tg_id).trim()] = true });
-  TEAM_SEED.forEach(function(m){
-    if (!have[String(m.id)]) insert('team', {tg_id: String(m.id), name: m.name, role: m.role || 'admin'});
-  });
+  var add = TEAM_SEED.filter(function(m){ return !have[String(m.id)] })
+                     .map(function(m){ return [String(m.id), m.name, m.role || 'admin'] });
+  if (!add.length) return;
+  var sh = sheet('team');
+  sh.getRange(sh.getLastRow()+1, 1, add.length, 3).setValues(add);   // одной пачкой
 }
 
 /** Дописывает в шапку листа колонки, которых там ещё нет. Данные не сдвигает. */
@@ -266,47 +295,6 @@ function ensureCols(name){
   var head = sh.getRange(1, 1, 1, last).getValues()[0];
   var add = COLS[name].filter(function(c){ return head.indexOf(c) < 0 });
   if (add.length) sh.getRange(1, last + 1, 1, add.length).setValues([add]);
-}
-
-/* ---------------- ежевечернее напоминание ----------------
- * Живёт на серверах Google: работает, даже когда все компьютеры выключены.
- * Раз в сутки проверяет, у каких позиций нет фото, и пишет об этом в Telegram.
- * Само фото не добавляет — кадр всё равно нужно выбрать глазами.
- */
-var SITE = 'https://horovodart.github.io/hrvdbarbot/';
-
-function notifyMissingPhotos(){
-  var token = prop('BOT_TOKEN'); if (!token) return;
-  var chat  = prop('NOTIFY_CHAT') || (typeof TEAM_SEED !== 'undefined' && TEAM_SEED[0] && TEAM_SEED[0].id);
-  if (!chat) return;
-  var gone = [];
-  rows('products').forEach(function(p){
-    if (p.hidden) return;
-    try {
-      var r = UrlFetchApp.fetch(SITE + 'img/' + p.id + '.webp', {muteHttpExceptions:true});
-      if (r.getResponseCode() !== 200) gone.push('• ' + p.name + (p.vol ? ' · ' + p.vol : ''));
-    } catch (e) { /* сеть моргнула — просто пропускаем позицию */ }
-  });
-  if (!gone.length) return;                       // всё на месте — молчим
-  var text = 'Бар HUB: без фото ' + gone.length + ' ' +
-             (gone.length % 10 === 1 && gone.length % 100 !== 11 ? 'позиция' : 'позиций') + '\n\n' +
-             gone.slice(0, 25).join('\n') +
-             (gone.length > 25 ? '\n… и ещё ' + (gone.length - 25) : '');
-  UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
-    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    payload: JSON.stringify({chat_id: chat, text: text, disable_notification: true})
-  });
-}
-
-/** Ставит ежедневный триггер один раз — при первом же запросе после деплоя. */
-function ensureTriggers(){
-  var props = PropertiesService.getScriptProperties();
-  if (props.getProperty('TRIGGERS_V') === '1') return;
-  ScriptApp.getProjectTriggers().forEach(function(t){
-    if (t.getHandlerFunction() === 'notifyMissingPhotos') ScriptApp.deleteTrigger(t);
-  });
-  ScriptApp.newTrigger('notifyMissingPhotos').timeBased().atHour(22).nearMinute(30).everyDays(1).create();
-  props.setProperty('TRIGGERS_V', '1');
 }
 
 /** Проверка без Telegram: выполни в редакторе и посмотри лог. */
