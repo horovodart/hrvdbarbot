@@ -3,14 +3,16 @@
 const C = window.HUB_CONFIG, TG = window.Telegram?.WebApp;
 const SALE = C.SALE_PRICE, HORIZON = C.HORIZON, AMBER = C.AMBER, TARGET = C.TARGET;
 const CAT = {sale:"По 1,50 €", water:"Вода · бесплатно", snack:"Снеки · бесплатно", shared:"Общие · не продаются"};
+const catName = c => CAT[c] || "Прочее";
 const CATS = ["sale","water","snack","shared"];
 const isFree = c => c === "water" || c === "snack";   // купили и раздали — деньги не вернутся
 const S = {products:[], counts:[], purchases:[], returns:[], open:{}, tab:"menu", filter:"all", buy:{}, count:null, f:{}, M:null, loaded:false};
 
 const $  = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const eur = n => (n<0?"−":"") + Math.abs(n).toFixed(2).replace(".",",") + " €";
-const dec = n => n.toFixed(1).replace(".",",");
+const eur = n => { const v = Math.abs(+n||0) < 0.005 ? 0 : (+n||0);      // без «−0,00 €»
+  return (v<0?"−":"") + Math.abs(v).toFixed(2).replace(".",",") + " €" };
+const dec = n => (n == null || !isFinite(n)) ? "—" : n.toFixed(1).replace(".",",");
 const ddmm = iso => { const d = new Date(iso); return String(d.getDate()).padStart(2,"0")+"."+String(d.getMonth()+1).padStart(2,"0") };
 const days = (a,b) => (new Date(b) - new Date(a)) / 864e5;
 const plural = (n,a,b,c) => { n = Math.abs(n)%100; const m = n%10; if(n>10&&n<20) return c; if(m>1&&m<5) return b; if(m==1) return a; return c };
@@ -19,10 +21,10 @@ const haptic = t => { try{ TG?.HapticFeedback?.impactOccurred(t||"light") }catch
 
 /* ---------- картинка товара: фото, если есть, иначе рисованная тара ---------- */
 function art(p){
-  const c = p.color || "#8A90A0", k = p.shape || "can";
+  const c = esc(p.color || "#8A90A0"), k = p.shape || "can", cap = esc(p.cap || "#E43");
   if(k==="can")     return `<svg class="fb" viewBox="0 0 40 64"><rect x="6" y="6" width="28" height="54" rx="6" fill="${c}"/><rect x="9" y="3" width="22" height="6" rx="3" fill="#B9BEC8"/><rect x="6" y="24" width="28" height="16" fill="#fff" opacity=".85"/><rect x="12" y="29" width="16" height="6" rx="2" fill="${c}"/></svg>`;
   if(k==="bottle")  return `<svg class="fb" viewBox="0 0 30 72"><rect x="11" y="2" width="8" height="5" rx="1.5" fill="#C9A43A"/><path d="M11 7h8v12c0 4 7 7 7 13v34a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V32c0-6 7-9 7-13z" fill="${c}"/><rect x="4" y="40" width="22" height="16" fill="#fff" opacity=".85"/><rect x="8" y="45" width="14" height="6" rx="2" fill="${c}"/></svg>`;
-  if(k==="pet")     return `<svg class="fb" viewBox="0 0 34 80"><rect x="12" y="2" width="10" height="6" rx="2" fill="${p.cap||"#E43"}"/><path d="M12 8h10v6c0 3 8 6 8 13v47a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V27c0-7 8-10 8-13z" fill="${c}" opacity=".92"/><rect x="4" y="36" width="26" height="18" fill="#fff" opacity=".8"/><rect x="8" y="42" width="18" height="6" rx="2" fill="${c}"/></svg>`;
+  if(k==="pet")     return `<svg class="fb" viewBox="0 0 34 80"><rect x="12" y="2" width="10" height="6" rx="2" fill="${cap}"/><path d="M12 8h10v6c0 3 8 6 8 13v47a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V27c0-7 8-10 8-13z" fill="${c}" opacity=".92"/><rect x="4" y="36" width="26" height="18" fill="#fff" opacity=".8"/><rect x="8" y="42" width="18" height="6" rx="2" fill="${c}"/></svg>`;
   if(k==="water")   return `<svg class="fb" viewBox="0 0 34 80"><rect x="12" y="2" width="10" height="6" rx="2" fill="#2B6CB0"/><path d="M12 8h10v6c0 3 8 6 8 13v47a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4V27c0-7 8-10 8-13z" fill="${c}" opacity=".45"/><rect x="4" y="38" width="26" height="14" fill="${c}"/><path d="M4 60h26M4 66h26" stroke="#fff" stroke-width="1.5" opacity=".6"/></svg>`;
   if(k==="capsule") return `<svg class="fb" viewBox="0 0 64 64"><ellipse cx="32" cy="46" rx="24" ry="8" fill="${c}" opacity=".5"/><path d="M10 44 L18 18 H46 L54 44 Z" fill="${c}"/><ellipse cx="32" cy="18" rx="14" ry="4" fill="#D9B98C"/><ellipse cx="32" cy="44" rx="22" ry="6" fill="${c}"/></svg>`;
   return `<svg class="fb" viewBox="0 0 40 64"><rect x="6" y="10" width="28" height="48" rx="4" fill="${c}"/><path d="M6 18 L20 4 L34 18" fill="${c}"/><rect x="6" y="28" width="28" height="12" fill="#fff" opacity=".6"/></svg>`;
@@ -85,7 +87,9 @@ function model(){
       const measured = r.meas[p.id];
       periods.push({from:r.from.date, to:r.to.date, days:r.days, cons:r.cons[p.id], bought:r.bought[p.id]||0, measured,
                     perWeek: measured && r.days>0 ? Math.max(0,r.cons[p.id]/r.days*7) : null});
-      if(measured){ tot += r.cons[p.id]; dd += r.days }
+      // Период короче суток — не измерение: пара подсчётов подряд давала бы
+      // расход в сотни штук в день и заказ на тысячи штук.
+      if(measured && r.days >= 1){ tot += r.cons[p.id]; dd += r.days }
     }
     const rate = dd>0 ? Math.max(0, tot/dd) : null;      // шт в день; null = данных ещё нет
     const exact = (base ?? 0) + (since[p.id]||0);
@@ -130,14 +134,16 @@ function model(){
     if(it?.rate) paid += it.rate * dSince * dep;          // с последнего подсчёта — по среднему расходу
   }
   const back = S.returns.filter(r => !start || r.date > start).reduce((s,r) => s + (+r.amount||0), 0);
-  tare.waiting = Math.max(0, paid - back);
+  tare.waiting = paid - back;      // минус означает «сдали больше выпитого» — так и покажем
   tare.paid = paid;
+  tare.back = back;
 
   return {counts, purch, recs, last, lastRec:recs[recs.length-1], items, dSince, tare};
 }
 
 /* ---------- меню ---------- */
-const sorted = () => [...S.products].filter(p=>!p.hidden).sort((a,b)=>(a.order??99)-(b.order??99));
+const sorted = () => [...S.products].filter(p => S.filter === "hidden" ? p.hidden : !p.hidden)
+                                     .sort((a,b)=>(a.order??99)-(b.order??99));
 const flag = (it,p) => p.phaseout   ? `<span class="flag grey">Распродаём</span>`
                      : it.st==="red"   ? `<span class="flag red">${Math.round(it.est)<=0?"Закончилось":"Докупить"}</span>`
                      : it.st==="amber" ? `<span class="flag amber">Скоро</span>` : "";
@@ -170,16 +176,22 @@ function money(r){
       <dt class="tot">Итог периода</dt><dd class="tot ${r.net>=0?"pos":"neg"}">${r.net>0?"+":""}${eur(r.net)}</dd>
     </dl>
     <p class="note" style="margin:10px 0 0">Если бы платили все — ${r.ideal>0?"+":""}${eur(r.ideal)}. ${be!=null?`В ноль выходим при ${be}% оплаты.`:""}${r.depSpent?" Залога за тару ушло "+eur(r.depSpent)+" — вернётся при сдаче.":""}</p>
+    ${(() => {
+      const noPrice = S.products.filter(p => (p.cat==="sale"||isFree(p.cat)) && p.cost == null && (r.cons?.[p.id]||0) > 0);
+      return noPrice.length ? `<p class="note" style="margin:6px 0 0"><b>Итог завышен:</b> у ${noPrice.length} ${plural(noPrice.length,"позиции","позиций","позиций")} не заполнена цена закупки, их выпили, но в расход они не попали — ${noPrice.map(p=>esc(p.name)).join(", ")}.</p>` : "";
+    })()}
     ${r.buys != null ? `<p class="note" style="margin:6px 0 0">За период отмечено закупок: ${r.buys}. Если какая-то не отмечена, выпито посчитается меньше, а недобор выйдет больше настоящего.</p>` : ""}`;
 }
 
 function renderMenu(M){
   const all = sorted();
+  const shown = all.filter(p => M.items[p.id].restock || Math.round(M.items[p.id].est) > 0);
   const cnt = f => all.filter(p => M.items[p.id].st === f).length;
   $("#chips").innerHTML =
-    `<button class="chip" data-f="all" aria-pressed="${S.filter==="all"}">Всё<span class="n num">${all.length}</span></button>`+
+    `<button class="chip" data-f="all" aria-pressed="${S.filter==="all"}">Всё<span class="n num">${shown.length}</span></button>`+
     `<button class="chip" data-f="red" aria-pressed="${S.filter==="red"}"><span class="dot" style="background:var(--red)"></span>Докупить<span class="n num">${cnt("red")}</span></button>`+
-    `<button class="chip" data-f="amber" aria-pressed="${S.filter==="amber"}"><span class="dot" style="background:var(--amber)"></span>Скоро<span class="n num">${cnt("amber")}</span></button>`;
+    `<button class="chip" data-f="amber" aria-pressed="${S.filter==="amber"}"><span class="dot" style="background:var(--amber)"></span>Скоро<span class="n num">${cnt("amber")}</span></button>`+
+    (S.products.some(p=>p.hidden) ? `<button class="chip" data-f="hidden" aria-pressed="${S.filter==="hidden"}">Убранные<span class="n num">${S.products.filter(p=>p.hidden).length}</span></button>` : "");
 
   let html = "";
   const r = M.lastRec;
@@ -240,7 +252,7 @@ function renderBuy(M){
       <div class="sub2">${esc(p.vol||"")}${p.pack?" · упак. "+p.pack:""}</div></div>${stepper(p.id, S.buy[p.id]||0, "b")}</div>`;
   }
   h += `</div>
-  <button class="btn ghost" id="tareBtn" style="margin-top:12px">Сдал тару · ждёт сдачи ~${eur(M.tare.waiting)}</button>
+  <button class="btn ghost" id="tareBtn" style="margin-top:12px">Сдал тару · ${M.tare.waiting < 0 ? "сдано с запасом" : "ждёт сдачи ~"+eur(M.tare.waiting)}</button>
   <div class="fields" style="margin-top:12px">
     <div class="field"><label for="buySum">Сумма чека, €</label><input id="buySum" value="${esc(S.f.buySum||"")}" inputmode="decimal" placeholder="например 97,48"></div>
     <div class="field"><label for="buyWho">Кто купил</label><input id="buyWho" value="${esc(S.f.buyWho||"")}" placeholder="имя"></div></div>
@@ -249,6 +261,7 @@ function renderBuy(M){
     <div class="fields"><div class="field"><label for="npCat">Категория</label><select id="npCat"><option value="sale">По 1,50 €</option><option value="water">Вода</option><option value="snack">Снеки</option><option value="shared">Общие, не продаются</option></select></div>
     <div class="field"><label for="npShape">Тара</label><select id="npShape"><option value="bottle">Стекло</option><option value="can">Банка</option><option value="pet">ПЭТ</option><option value="water">Вода</option><option value="capsule">Капсула</option></select></div></div>
     <div class="fields"><div class="field"><label for="npCost">Закупка за шт, €</label><input id="npCost" inputmode="decimal"></div><div class="field"><label for="npPack">Упаковка, шт</label><input id="npPack" inputmode="numeric" value="6"></div>
+    <div class="field"><label for="npDep">Залог, €</label><input id="npDep" inputmode="decimal" value="0,15"></div>
     <div class="field"><label for="npColor">Цвет</label><input id="npColor" type="color" value="#2F8F5B" style="padding:4px;height:46px"></div></div>
     <button class="btn ghost" id="npAdd">Добавить в меню</button></div></details>`;
   return h;
@@ -257,15 +270,17 @@ function renderBuy(M){
 /* ---------- подсчёт ---------- */
 function renderCount(M){
   const all = sorted();
-  if(!S.count){ S.count = {}; for(const p of all) if(M.items[p.id].restock || Math.round(M.items[p.id].est) > 0) S.count[p.id] = Math.round(M.items[p.id].est) }
+  // Выкидываем позицию из подсчёта только если её обнулил ЧЕЛОВЕК на прошлом подсчёте.
+  // По расчётной оценке нельзя: виски на полке «допился» бы сам и исчез из приложения.
+  const countable = p => M.items[p.id].restock || (M.items[p.id].base ?? 0) > 0 || M.items[p.id].bought > 0;
+  if(!S.count){ S.count = {}; for(const p of all) if(countable(p)) S.count[p.id] = Math.round(M.items[p.id].est) }
   let h = `<h2 class="sec">Подсчёт раз в 2 недели<em>${M.last ? "прошлый "+ddmm(M.last.date)+" · "+Math.floor(M.dSince)+" дн. назад" : ""}</em></h2>
     <p class="note" style="margin:0 0 12px">Посчитай холодильник и полки вместе. Поля заполнены расчётом — поправь на то, что видишь.</p><div class="panel">`;
   // кончившееся на сбыте не переспрашиваем: понадобится — заведут заново
-  const countable = p => M.items[p.id].restock || Math.round(M.items[p.id].est) > 0;
   for(const cat of CATS) for(const p of all.filter(x => x.cat===cat && countable(x))){
     const it = M.items[p.id];
     h += `<div class="row"><div class="mini">${pic(p)}</div><div class="info"><div class="nm">${esc(p.name)}</div>
-      <div class="sub2 num">было ${it.base ?? "—"}${it.bought?" + куплено "+it.bought:""}</div></div>${stepper(p.id, S.count[p.id] ?? 0, "c")}</div>`;
+      <div class="sub2 num">было ${esc(it.base ?? "—")}${it.bought?" + куплено "+esc(it.bought):""}</div></div>${stepper(p.id, S.count[p.id] ?? 0, "c")}</div>`;
   }
   h += `</div><h2 class="sec">Деньги за период</h2><div class="fields">
     <div class="field"><label for="cCash">Касса (наличные), €</label><input id="cCash" value="${esc(S.f.cCash||"")}" inputmode="decimal" placeholder="0"></div>
@@ -286,8 +301,14 @@ function previewCount(M){
     if(isFree(p.cat)){ free  += c; if(p.cost != null) costWater += c*p.cost }
     depSpent += M.items[p.id].bought * (+p.dep || 0);
   }
-  const exp = units*SALE, got = num($("#cCash")?.value) + num($("#cCard")?.value);
-  el.innerHTML = money({saleUnits:units, freeUnits:free, expected:exp, got, short:got-exp,
+  // те же поправки, что и в model(): иначе предпросмотр и сохранённый подсчёт разойдутся
+  const from = M.last.date, nowIso = new Date().toISOString();
+  const backed = S.returns.filter(r => r.toTill && r.date > from && r.date <= nowIso)
+                          .reduce((s,r) => s + (+r.amount||0), 0);
+  const buys = M.purch.filter(x => x.date > from && x.date <= nowIso).length;
+  const exp = units*SALE;
+  const got = num($("#cCash")?.value) + num($("#cCard")?.value) - backed;
+  el.innerHTML = money({saleUnits:units, freeUnits:free, expected:exp, got, short:got-exp, backed, buys,
     costSale, costWater, depSpent, net:got-costSale-costWater, ideal:exp-costSale-costWater,
     payRate: exp>0?got/exp:null, breakEven: exp>0?(costSale+costWater)/exp:null});
 }
@@ -302,13 +323,13 @@ function renderHist(M){
   let h = `<h2 class="sec">История</h2><div class="hist">`;
   for(const e of ev){
     if(e.t === "rec"){ const r = e.r;
-      const top = Object.entries(r.cons).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([k,v])=>`${esc(name(k))} ${v}`).join(" · ");
+      const top = Object.entries(r.cons).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([k,v])=>`${esc(name(k))} ${esc(v)}`).join(" · ");
       h += `<div class="panel pad"><div class="h"><b>Подсчёт ${ddmm(r.to.date)}</b><span class="pill ${r.net>=0?"green":"red"} num">${r.net>0?"+":""}${eur(r.net)}</span></div>
-        <p class="note" style="margin:0 0 10px">${ddmm(r.from.date)}–${ddmm(r.to.date)} · ${Math.round(r.days)} дн.</p>
+        <p class="note" style="margin:0 0 10px">${ddmm(r.from.date)}–${ddmm(r.to.date)} · ${r.days < 1 ? "меньше суток" : Math.round(r.days)+" дн."}</p>
         ${money(r)}<p class="note" style="margin:10px 0 0">${top}</p>
         <div style="text-align:right;margin-top:6px">${r.to.by?`<span class="note">считал(а): ${esc(r.to.by)}</span>`:""} <button class="del" data-del="counts/${esc(r.to.id)}">удалить</button></div></div>`;
     } else if(e.t === "buy"){ const p = e.p;
-      const list = Object.entries(p.items||{}).filter(([,v])=>v>0).map(([k,v])=>`${esc(name(k))} +${v}`).join(" · ");
+      const list = Object.entries(p.items||{}).filter(([,v])=>v>0).map(([k,v])=>`${esc(name(k))} +${esc(v)}`).join(" · ");
       h += `<div class="panel pad"><div class="h"><b>Закупка ${ddmm(p.date)}</b>${p.total?`<span class="num">${eur(+p.total)}</span>`:""}</div>
         <p class="note" style="margin:0">${list}</p>${p.source?`<p class="note" style="margin:6px 0 0">${esc(p.source)}</p>`:""}
         <div style="text-align:right;margin-top:6px">${p.by?`<span class="note">${esc(p.by)}</span>`:""} <button class="del" data-del="purchases/${esc(p.id)}">удалить</button></div></div>`;
@@ -351,15 +372,15 @@ function sheet(p){
     <div class="hero">${pic(p)}</div>
     <div class="body">
       <h3>${esc(p.name)}</h3>
-      <div class="meta">${esc(p.vol||"")} · ${CAT[p.cat]}</div>
+      <div class="meta">${esc(p.vol||"")} · ${catName(p.cat)}</div>
       <div class="priceline">
-        <b class="num">${p.cat==="sale" ? eur(SALE) : p.cat==="free" ? "бесплатно" : "не продаётся"}</b>
+        <b class="num">${p.cat==="sale" ? eur(SALE) : isFree(p.cat) ? "бесплатно" : "не продаётся"}</b>
         <span class="buy num">${buyLine}</span>
       </div>
       <div class="kv num">
         ${kv("Остаток", (it.estimated?"≈ ":"")+n+" шт", it.st!=="green"?it.st:"")}
         ${kv("Хватит на", it.daysLeft!=null ? (it.daysLeft>60?"больше 60 дн.":Math.floor(it.daysLeft)+" "+plural(Math.floor(it.daysLeft),"день","дня","дней")) : "нет данных", it.daysLeft==null?"dim":(it.st!=="green"?it.st:""))}
-        ${kv("Средний расход", it.rate ? dec(it.rate*7)+" в нед." : "нет данных", it.rate?"":"dim")}
+        ${kv("Средний расход", it.rate != null ? dec(it.rate*7)+" в нед." : "нет данных", it.rate!=null?"":"dim")}
         ${kv("Купить на "+TARGET+" дн.", it.need ? "+"+it.need+" шт" : "не нужно", it.need?"":"dim")}
       </div>
       <div class="blk"><h4>Среднее использование</h4>${use}</div>
@@ -371,12 +392,12 @@ function sheet(p){
         <label class="chk"><input type="checkbox" id="edPhase" ${p.phaseout?"checked":""}><span><b>Распродаём</b> — допиваем остаток, больше не докупаем</span></label>
       </div>
       <div class="fields" style="margin-top:16px"><button class="btn ghost" id="edClose" style="flex:1">Закрыть</button><button class="btn" id="edSave" style="flex:1">Сохранить</button></div>
-      <div style="text-align:center"><button class="del" id="edHide" style="margin-top:12px">убрать из меню</button></div>
+      <div style="text-align:center"><button class="del" id="edHide" style="margin-top:12px">${p.hidden ? "вернуть в меню" : "убрать из меню"}</button></div>
     </div></div>`;
   document.body.appendChild(bg);
   haptic("light");
 
-  const close = () => { bg.remove(); TG?.BackButton?.hide() };
+  const close = () => { bg.remove(); TG?.BackButton?.offClick(close); TG?.BackButton?.hide() };
   TG?.BackButton?.show(); TG?.BackButton?.onClick(close);
   bg.addEventListener("click", e => { if(e.target === bg) close() });
   bg.querySelector("#edClose").onclick = close;
@@ -392,6 +413,11 @@ function sheet(p){
   };
   const hb = bg.querySelector("#edHide");
   hb.onclick = async () => {
+    if(p.hidden){                                    // вернуть можно без подтверждения
+      try{ await apply(API.updateProduct(p.id, {hidden:false})); toast("Вернул в меню"); close() }
+      catch(e){ toast("Ошибка: "+e.message) }
+      return;
+    }
     if(!hb.classList.contains("armed")){ hb.classList.add("armed"); hb.textContent = "точно убрать? нажми ещё раз"; return }
     try{ await apply(API.updateProduct(p.id, {hidden:true})); toast("Убрано из меню"); close() }catch(e){ toast("Ошибка: "+e.message) }
   };
@@ -415,15 +441,17 @@ function tareSheet(M){
       <div class="blk"><h4>Тара</h4>
         <dl class="recon num">
           <dt>Сдано за всё время</dt><dd>${M.tare.units} шт · ${eur(M.tare.amount)}</dd>
+          <dt>Сдано с начала учёта</dt><dd>${eur(M.tare.back)}</dd>
+          <dt>Залог за выпитое с начала учёта</dt><dd>${eur(M.tare.paid)}</dd>
           ${M.tare.last ? `<dt>Последняя сдача</dt><dd>${ddmm(M.tare.last)}</dd>` : ""}
-          <dt class="tot">Ждёт сдачи · примерно</dt><dd class="tot">${units(M.tare.waiting)} шт · ${eur(M.tare.waiting)}</dd>
+          <dt class="tot">${M.tare.waiting < 0 ? "Сдали больше выпитого" : "Ждёт сдачи · примерно"}</dt><dd class="tot ${M.tare.waiting<0?"pos":""}">${Math.abs(units(M.tare.waiting))} шт · ${eur(Math.abs(M.tare.waiting))}</dd>
         </dl>
         <p class="note" style="margin:8px 0 0">«Ждёт сдачи» — залог за всё выпитое минус всё, что уже сдали. Цифра приблизительная: часть тары ещё стоит непустой, часть выбрасывают, а иногда наоборот — гости и соседи приносят свои бутылки, и сдаётся больше выпитого. Сверяется сама: сдал — она упала ровно на сумму из автомата.</p>
       </div>
       <div class="fields" style="margin-top:16px"><button class="btn ghost" id="tClose" style="flex:1">Закрыть</button><button class="btn" id="tSave" style="flex:1">Записать</button></div>
     </div></div>`;
   document.body.appendChild(bg);
-  const close = () => { bg.remove(); TG?.BackButton?.hide() };
+  const close = () => { bg.remove(); TG?.BackButton?.offClick(close); TG?.BackButton?.hide() };
   TG?.BackButton?.show(); TG?.BackButton?.onClick(close);
   bg.addEventListener("click", e => { if(e.target === bg) close() });
   const inp = bg.querySelector("#tSum");
@@ -467,7 +495,7 @@ function moneySheet(r){
       <button class="btn ghost" id="mClose" style="margin-top:16px">Закрыть</button>
     </div></div>`;
   document.body.appendChild(bg);
-  const close = () => { bg.remove(); TG?.BackButton?.hide() };
+  const close = () => { bg.remove(); TG?.BackButton?.offClick(close); TG?.BackButton?.hide() };
   TG?.BackButton?.show(); TG?.BackButton?.onClick(close);
   bg.addEventListener("click", e => { if(e.target === bg) close() });
   bg.querySelector("#mClose").onclick = close;
@@ -502,7 +530,10 @@ async function apply(promise){ const d = await promise; S.products = d.products;
 /* ---------- события ---------- */
 document.addEventListener("click", async e => {
   const t = e.target.closest("[data-tab]");
-  if(t){ S.tab = t.dataset.tab; document.querySelectorAll(".tab").forEach(x => x.setAttribute("aria-selected", x === t)); if(S.tab === "count") S.count = null; haptic("light"); render(); scrollTo(0,0); return }
+  if(t){ const was = S.tab; S.tab = t.dataset.tab;
+    document.querySelectorAll(".tab").forEach(x => x.setAttribute("aria-selected", x === t));
+    if(S.tab === "count" && was !== "count") S.count = null;   // не стираем набранное при тапе по активной вкладке
+    haptic("light"); render(); scrollTo(0,0); return }
   const f = e.target.closest("[data-f]"); if(f){ S.filter = f.dataset.f; haptic("light"); render(); return }
   const sc = e.target.closest("[data-sec]"); if(sc){ S.open[sc.dataset.sec] = !S.open[sc.dataset.sec]; haptic("light"); render(); return }
   const c = e.target.closest(".card[data-p]"); if(c){ const p = S.products.find(x => x.id === c.dataset.p); if(p) sheet(p); return }
@@ -511,8 +542,9 @@ document.addEventListener("click", async e => {
   const s = e.target.closest(".step button");
   // счётчики внутри шторок обслуживают себя сами
   if(s && !s.closest(".sheet-bg")){ const inp = s.parentElement.querySelector("input"), v = Math.max(0,(parseInt(inp.value)||0) + (+s.dataset.d)); inp.value = v; setVal(inp.dataset.k, s.dataset.id, v); haptic("light"); return }
-  if(e.target.id === "fillNeed"){ for(const p of S.products){ const n = S.M.items[p.id]?.need; if(n) S.buy[p.id] = n } render(); toast("Список перенесён — поправь по чеку"); return }
-  if(e.target.id === "refresh"){ e.target.classList.add("spin"); try{ await apply(API.list()); toast("Обновлено") }catch(err){ toast("Не вышло: "+err.message) } e.target.classList.remove("spin"); return }
+  if(e.target.closest("#fillNeed")){ for(const p of sorted()){ const n = S.M.items[p.id]?.need; if(n) S.buy[p.id] = n } render(); toast("Список перенесён — поправь по чеку"); return }
+  const rf = e.target.closest("#refresh");
+  if(rf){ rf.classList.add("spin"); try{ await apply(API.list()); toast("Обновлено") }catch(err){ toast("Не вышло: "+err.message) } rf.classList.remove("spin"); return }
   const d = e.target.closest("[data-del]");
   if(d){ if(!d.classList.contains("armed")){ d.classList.add("armed"); d.textContent = "точно удалить?"; return }
     const [col,id] = d.dataset.del.split("/");
@@ -544,8 +576,13 @@ async function saveBuy(){
   }catch(e){ toast("Не сохранилось: "+e.message); b.disabled = false }
 }
 async function saveCount(){
-  // в подсчёт попадает только то, что показывали: нулевой сбыт не воскрешаем
-  const stock = {}; for(const p of sorted()) if(S.count[p.id] != null) stock[p.id] = S.count[p.id];
+  // В подсчёт идёт то, что показывали. Скрытым переносим прошлый остаток:
+  // иначе убранная из меню позиция рвёт расчёт расхода в следующем периоде.
+  const stock = {};
+  for(const p of S.products){
+    if(S.count[p.id] != null) stock[p.id] = S.count[p.id];
+    else if(p.hidden && S.M.items[p.id]?.base != null) stock[p.id] = S.M.items[p.id].base;
+  }
   const b = $("#dockBtn"); b.disabled = true;
   try{
     await apply(API.addCount({date:new Date().toISOString(), stock, cash:num($("#cCash").value), card:num($("#cCard").value), by:$("#cWho").value.trim()||null}));
@@ -555,16 +592,24 @@ async function saveCount(){
 }
 async function addProduct(){
   const name = $("#npName").value.trim(); if(!name){ toast("Впиши название"); return }
-  const base = name.toLowerCase().replace(/[^a-z0-9а-я]+/gi,"-").replace(/^-|-$/g,"").slice(0,40) + "-" + Date.now().toString(36);
-  const id = base.replace(/[^A-Za-z0-9_\-]/g, c => c.charCodeAt(0).toString(36));
+  // кириллицу переводим в латиницу: id попадает в имя файла с фотографией
+  const TR = {а:"a",б:"b",в:"v",г:"g",д:"d",е:"e",ё:"e",ж:"zh",з:"z",и:"i",й:"y",к:"k",л:"l",м:"m",н:"n",
+    о:"o",п:"p",р:"r",с:"s",т:"t",у:"u",ф:"f",х:"h",ц:"c",ч:"ch",ш:"sh",щ:"sch",ъ:"",ы:"y",ь:"",э:"e",ю:"yu",я:"ya"};
+  const id = (name.toLowerCase().replace(/[а-яё]/g, c => TR[c] ?? "")
+    .replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,28) || "item") + "-" + Date.now().toString(36);
   const cat = $("#npCat").value;
   try{
     await apply(API.addProduct(id, {name, vol:$("#npVol").value.trim(), cat, shape:$("#npShape").value,
-      cost:num($("#npCost").value)||null, pack:parseInt($("#npPack").value)||null, color:$("#npColor").value,
+      cost:num($("#npCost").value)||null, dep:num($("#npDep").value)||0,
+      pack:parseInt($("#npPack").value)||null, color:$("#npColor").value,
       order: cat==="sale"?50:isFree(cat)?70:90, min: cat==="shared"?1:6}));
     toast("Добавлено в меню");
   }catch(e){ toast("Не сохранилось: "+e.message) }
 }
+
+/* Отладочный доступ к модели: включается только адресом с ?debug=1.
+   Нужен для сверки цифр приложения против эталонного пересчёта. */
+if(location.search.includes("debug=1")) window.__hub = {S, model, get M(){ return S.M }};
 
 /* ---------- старт ---------- */
 (async () => {

@@ -29,14 +29,20 @@ var BOOL_FIELDS = {hidden:1, initial:1, phaseout:1, toTill:1};
 // сразу после деплоя, а не ждали, пока кто-нибудь откроет приложение.
 function doGet(e)  {
   return respond(function(){
+    // Адрес публичный, поэтому синк тут должен быть дешёвым и безобидным:
+    //  — при совпадении SEED_VERSION он выходит сразу, ничего не читая и не записывая;
+    //  — замок берём на пару секунд и, если занят, молча уходим, чтобы не мешать команде;
+    //  — пишутся только строки, заведённые из кода, так что подсунуть ничего нельзя.
     var synced = false;
-    try {
-      var lock = LockService.getScriptLock();
-      if (lock.tryLock(30000)) {
-        try { if (sheet('products').getLastRow() > 1) { syncProducts(); syncTeam(); synced = true } }
-        finally { lock.releaseLock() }
-      }
-    } catch (err) { /* синк не критичен для проверки живости */ }
+    if (String(PropertiesService.getScriptProperties().getProperty('SEED_VERSION')) !== String(SEED_VERSION)) {
+      try {
+        var lock = LockService.getScriptLock();
+        if (lock.tryLock(2000)) {
+          try { if (sheet('products').getLastRow() > 1) { syncProducts(); syncTeam(); synced = true } }
+          finally { lock.releaseLock() }
+        }
+      } catch (err) { /* синк не критичен для проверки живости */ }
+    }
     return {alive:true, synced:synced, ts:new Date().toISOString()};
   });
 }
@@ -81,7 +87,9 @@ function auth(initData){
 
   var data = {};
   pairs.forEach(function(p){ var i = p.indexOf('='); data[p.slice(0,i)] = p.slice(i+1) });
-  if (Number(data.auth_date) * 1000 < Date.now() - 24*3600*1000) throw new Error('Сессия устарела, перезапусти приложение');
+  var authAt = Number(data.auth_date) * 1000;
+  if (!isFinite(authAt) || authAt < Date.now() - 24*3600*1000 || authAt > Date.now() + 5*60*1000)
+    throw new Error('Сессия устарела, перезапусти приложение');
 
   var user = JSON.parse(data.user || '{}');
   var id = String(user.id || '');
@@ -92,16 +100,17 @@ function auth(initData){
 
 function allowed(id, user){
   if (!id) return false;
+  // Аварийный доступ из свойств скрипта работает всегда, а не только на пустом листе
+  var admins = String(prop('ADMIN_IDS') || '').split(',').map(function(s){ return s.trim() }).filter(String);
+  if (admins.indexOf(id) >= 0) return true;
+
   var team = rows('team').map(function(r){ return String(r.tg_id).trim() }).filter(String);
   if (team.length) return team.indexOf(id) >= 0;
 
-  var admins = String(prop('ADMIN_IDS') || '').split(',').map(function(s){ return s.trim() }).filter(String);
-  if (admins.length) return admins.indexOf(id) >= 0;
+  // Лист пуст и аварийного списка нет — не пускаем никого: иначе админом
+  // станет первый случайный человек, открывший бота
 
-  // Бутстрап: список команды пуст — первый, кто вошёл через Telegram, становится админом.
-  // Дальше пускает только тех, кто есть в листе «team».
-  sheet('team').appendRow([id, (user && user.name) || 'первый вход', 'admin']);
-  return true;
+  return false;
 }
 
 /* ---------------- действия ---------------- */
@@ -178,6 +187,7 @@ function rows(name){
       var v = r[i];
       if (JSON_FIELDS[h])      { try { o[h] = v ? JSON.parse(v) : {} } catch(e){ o[h] = {} } }
       else if (v === '')         o[h] = (NUM_FIELDS[h] ? null : '');
+      else if (NUM_FIELDS[h])    { var n = Number(String(v).replace(',', '.')); o[h] = isFinite(n) ? n : null }
       else if (BOOL_FIELDS[h])   o[h] = (v === true || v === 'TRUE' || v === 'да');
       else if (h === 'date')      o[h] = (v instanceof Date) ? v.toISOString() : String(v);
       else                        o[h] = v;
@@ -186,9 +196,14 @@ function rows(name){
   }).filter(function(o){ return String(o.id || o.tg_id || '') !== '' });
 }
 function cell(name, key, val){
-  if (JSON_FIELDS[key]) return JSON.stringify(val || {});
+  if (JSON_FIELDS[key]) return safeText(JSON.stringify(val || {}));
   if (val === null || val === undefined) return '';
-  return val;
+  return typeof val === 'string' ? safeText(val) : val;
+}
+
+/** Таблица считает формулой всё, что начинается с = + - @. Имя из Telegram — не формула. */
+function safeText(v){
+  return /^[=+\-@]/.test(v) ? "'" + v : v;
 }
 function insert(name, obj){
   var sh = sheet(name), head = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
@@ -197,7 +212,10 @@ function insert(name, obj){
 function findRow(name, id){
   var sh = sheet(name), last = sh.getLastRow();
   if (last < 2) return -1;
-  var ids = sh.getRange(2,1,last-1,1).getValues();
+  var head = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
+  var col = head.indexOf('id') + 1;                 // id не обязан быть первой колонкой
+  if (col < 1) return -1;
+  var ids = sh.getRange(2,col,last-1,1).getValues();
   for (var i = 0; i < ids.length; i++) if (String(ids[i][0]) === String(id)) return i + 2;
   return -1;
 }
@@ -221,13 +239,15 @@ function setup(){
   var d = SEED;
   try { book().rename('HOROVOD HUB \u00b7 \u0431\u0430\u0440') } catch (e) {}
   ['products','counts','purchases','returns','team'].forEach(function(n){ sheet(n) });
-  ['products','counts','purchases'].forEach(function(name){
-    var sh = sheet(name);
-    if (sh.getLastRow() > 1) sh.getRange(2,1,sh.getLastRow()-1,sh.getLastColumn()).clearContent();
-    Object.keys(d[name] || {}).forEach(function(id){
-      var o = d[name][id]; o.id = id; insert(name, o);
-    });
+  // Справочник можно перезаливать: он весь из кода. Подсчёты, закупки и сдачи тары —
+  // живые данные команды, их только досыпаем по id и никогда не чистим.
+  var sh = sheet('products');
+  if (sh.getLastRow() > 1) sh.getRange(2,1,sh.getLastRow()-1,sh.getLastColumn()).clearContent();
+  Object.keys(d.products || {}).forEach(function(id){
+    var o = d.products[id]; o.id = id; insert('products', o);
   });
+  syncSeeded('counts');
+  syncSeeded('purchases');
   sheet('team'); // остаётся пустым: первый, кто откроет приложение, впишется сюда админом
   try { SpreadsheetApp.getActive().toast('Готово: ' + Object.keys(d.products).length + ' товаров') } catch (e) {}
 }
@@ -318,8 +338,12 @@ function syncTeam(){
   var add = TEAM_SEED.filter(function(m){ return !have[String(m.id)] })
                      .map(function(m){ return [String(m.id), m.name, m.role || 'admin'] });
   if (!add.length) return;
-  var sh = sheet('team');
-  sh.getRange(sh.getLastRow()+1, 1, add.length, 3).setValues(add);   // одной пачкой
+  var sh = sheet('team'), w = sh.getLastColumn();
+  var head = sh.getRange(1,1,1,w).getValues()[0];
+  var grid = add.map(function(m){
+    return head.map(function(h){ return h === 'tg_id' ? m[0] : h === 'name' ? m[1] : h === 'role' ? m[2] : '' });
+  });
+  sh.getRange(sh.getLastRow()+1, 1, grid.length, w).setValues(grid);   // одной пачкой
 }
 
 /** Дописывает в шапку листа колонки, которых там ещё нет. Данные не сдвигает. */
