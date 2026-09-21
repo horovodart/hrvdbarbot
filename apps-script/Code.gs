@@ -12,13 +12,14 @@
  */
 
 var COLS = {
-  products: ['id','name','vol','cat','shape','color','cap','cost','pack','min','order','note','hidden'],
+  products: ['id','name','vol','cat','shape','color','cap','cost','dep','pack','min','order','note','hidden','phaseout'],
   counts:   ['id','date','by','cash','card','initial','note','source','stock'],
   purchases:['id','date','by','total','source','items'],
   team:     ['tg_id','name','role']
 };
 var JSON_FIELDS = {stock:1, items:1};
-var NUM_FIELDS  = {cost:1, pack:1, min:1, order:1, cash:1, card:1, total:1};
+var NUM_FIELDS  = {cost:1, dep:1, pack:1, min:1, order:1, cash:1, card:1, total:1};
+var BOOL_FIELDS = {hidden:1, initial:1, phaseout:1};
 
 /* ---------------- вход ---------------- */
 
@@ -118,6 +119,7 @@ function handle(action, p, user){
 
 function listAll(){
   if (sheet('products').getLastRow() < 2) setup();   // первый запуск — заливаем стартовые данные сами
+  else syncProducts();                                // новая версия справочника — обновляем только товары
   var out = {};
   ['products','counts','purchases'].forEach(function(name){
     var o = {};
@@ -154,8 +156,7 @@ function rows(name){
       var v = r[i];
       if (JSON_FIELDS[h])      { try { o[h] = v ? JSON.parse(v) : {} } catch(e){ o[h] = {} } }
       else if (v === '')         o[h] = (NUM_FIELDS[h] ? null : '');
-      else if (h === 'hidden')   o[h] = (v === true || v === 'TRUE' || v === 'да');
-      else if (h === 'initial')  o[h] = (v === true || v === 'TRUE');
+      else if (BOOL_FIELDS[h])   o[h] = (v === true || v === 'TRUE' || v === 'да');
       else if (h === 'date')      o[h] = (v instanceof Date) ? v.toISOString() : String(v);
       else                        o[h] = v;
     });
@@ -207,6 +208,37 @@ function setup(){
   });
   sheet('team'); // остаётся пустым: первый, кто откроет приложение, впишется сюда админом
   try { SpreadsheetApp.getActive().toast('Готово: ' + Object.keys(d.products).length + ' товаров') } catch (e) {}
+}
+
+/**
+ * Справочник товаров (цены, тара, флаги) живёт в коде и приезжает с новой версией скрипта.
+ * Подсчёты и закупки при этом не трогаются — это данные, а не настройки.
+ * Цены, поправленные в приложении, синк перезапишет: справочник в коде главнее.
+ * Флаг «распродаём» синк не трогает — это решение команды, а не настройка.
+ */
+function syncProducts(){
+  var props = PropertiesService.getScriptProperties();
+  if (String(props.getProperty('SEED_VERSION')) === String(SEED_VERSION)) return;
+  ensureCols('products');
+  var have = {};
+  rows('products').forEach(function(r){ have[r.id] = true });
+  Object.keys(SEED.products || {}).forEach(function(id){
+    var o = SEED.products[id]; o.id = id;
+    if (!have[id]) { insert('products', o); return }
+    // «распродаём» — решение команды, принятое в приложении: синком не сбрасываем
+    var keep = {};
+    Object.keys(o).forEach(function(k){ if (k !== 'phaseout') keep[k] = o[k] });
+    patch('products', id, keep);
+  });
+  props.setProperty('SEED_VERSION', String(SEED_VERSION));
+}
+
+/** Дописывает в шапку листа колонки, которых там ещё нет. Данные не сдвигает. */
+function ensureCols(name){
+  var sh = sheet(name), last = sh.getLastColumn();
+  var head = sh.getRange(1, 1, 1, last).getValues()[0];
+  var add = COLS[name].filter(function(c){ return head.indexOf(c) < 0 });
+  if (add.length) sh.getRange(1, last + 1, 1, add.length).setValues([add]);
 }
 
 /** Проверка без Telegram: выполни в редакторе и посмотри лог. */

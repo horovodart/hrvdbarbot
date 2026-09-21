@@ -47,8 +47,22 @@ function model(){
       if(p.cat==="sale") saleUnits += v;
       if(p.cat==="free") freeUnits += v;
     }
+    let costSale = 0, costWater = 0, depSpent = 0;
+    for(const p of S.products){
+      const v = cons[p.id];
+      if(v != null && p.cost != null){
+        if(p.cat === "sale") costSale  += v*p.cost;
+        if(p.cat === "free") costWater += v*p.cost;
+      }
+      depSpent += (bought[p.id]||0) * (+p.dep || 0);
+    }
     const expected = saleUnits*SALE, got = (+b.cash||0) + (+b.card||0);
-    recs.push({id:b.id, from:a, to:b, days:days(a.date,b.date), cons, meas, bought, saleUnits, freeUnits, expected, got, diff:got-expected});
+    recs.push({id:b.id, from:a, to:b, days:days(a.date,b.date), cons, meas, bought, saleUnits, freeUnits,
+      expected, got, short: got-expected, costSale, costWater, depSpent,
+      net: got - costSale - costWater,          // реальный итог: пришло минус всё, что купили
+      ideal: expected - costSale - costWater,   // если бы платили все
+      payRate:   expected > 0 ? got/expected : null,
+      breakEven: expected > 0 ? (costSale+costWater)/expected : null});
   }
 
   const last = counts[counts.length-1];
@@ -74,25 +88,34 @@ function model(){
     const estimated = !!rate && dSince >= 1;
     const daysLeft = rate ? est/rate : null;
 
-    let st = "green";
-    if(Math.round(est) <= 0) st = "red";
-    else if(daysLeft != null){ if(daysLeft < HORIZON) st = "red"; else if(daysLeft < AMBER) st = "amber" }
-    else if(p.min != null){ if(est <= p.min) st = "red"; else if(est <= p.min*1.5) st = "amber" }
+    // «общие» попадают к нам случайно, «распродаём» специально не докупаем:
+    // и те и другие не тревожат красным и не просятся в закупку
+    const restock = p.cat !== "shared" && !p.phaseout;
+    let st = "none";
+    if(restock){
+      st = "green";
+      if(Math.round(est) <= 0) st = "red";
+      else if(daysLeft != null){ if(daysLeft < HORIZON) st = "red"; else if(daysLeft < AMBER) st = "amber" }
+      else if(p.min != null){ if(est <= p.min) st = "red"; else if(est <= p.min*1.5) st = "amber" }
+    }
 
     let need = 0;
-    if(rate) need = Math.max(0, rate*TARGET - est);
-    else if(st !== "green" && p.min) need = p.min*2 - est;
-    if(need>0 && p.pack) need = Math.ceil(need/p.pack)*p.pack; else need = Math.ceil(need);
+    if(restock){
+      if(rate) need = Math.max(0, rate*TARGET - est);
+      else if(st !== "green" && p.min) need = p.min*2 - est;
+      if(need>0 && p.pack) need = Math.ceil(need/p.pack)*p.pack; else need = Math.ceil(need);
+    }
 
-    items[p.id] = {est, exact, estimated, rate, daysLeft, st, need, periods, bought:since[p.id]||0, base};
+    items[p.id] = {est, exact, estimated, rate, daysLeft, st, need, restock, periods, bought:since[p.id]||0, base};
   }
   return {counts, purch, recs, last, lastRec:recs[recs.length-1], items, dSince};
 }
 
 /* ---------- меню ---------- */
 const sorted = () => [...S.products].filter(p=>!p.hidden).sort((a,b)=>(a.order??99)-(b.order??99));
-const flag = it => it.st==="red"   ? `<span class="flag red">${Math.round(it.est)<=0?"Закончилось":"Докупить"}</span>`
-                 : it.st==="amber" ? `<span class="flag amber">Скоро</span>` : "";
+const flag = (it,p) => p.phaseout   ? `<span class="flag grey">Распродаём</span>`
+                     : it.st==="red"   ? `<span class="flag red">${Math.round(it.est)<=0?"Закончилось":"Докупить"}</span>`
+                     : it.st==="amber" ? `<span class="flag amber">Скоро</span>` : "";
 
 function stockLine(it){
   const n = Math.round(it.est);
@@ -106,6 +129,23 @@ const tagFor = p => p.cat==="sale" ? `<span class="tag num">${eur(SALE)}</span>`
                   : p.cat==="free" ? `<span class="tag free">бесплатно</span>`
                   : `<span class="tag">общее</span>`;
 
+function money(r){
+  const pct = r.payRate != null ? Math.round(r.payRate*100) : null;
+  const be  = r.breakEven != null && isFinite(r.breakEven) ? Math.round(r.breakEven*100) : null;
+  return `<dl class="recon num">
+      <dt>Выпито платных</dt><dd>${r.saleUnits} шт</dd>
+      <dt>Должно быть (× ${eur(SALE)})</dt><dd>${eur(r.expected)}</dd>
+      <dt>Пришло: касса + карта</dt><dd>${eur(r.got)}</dd>
+      <dt class="tot">Недобор</dt><dd class="tot ${r.short>=0?"pos":"neg"}">${r.short>0?"+":""}${eur(r.short)}${pct!=null?" · оплачено "+pct+"%":""}</dd>
+    </dl>
+    <dl class="recon num" style="margin-top:12px">
+      <dt>Закупка выпитого</dt><dd>−${eur(r.costSale)}</dd>
+      <dt>Вода · ${r.freeUnits} шт · отбивки нет</dt><dd>−${eur(r.costWater)}</dd>
+      <dt class="tot">Итог периода</dt><dd class="tot ${r.net>=0?"pos":"neg"}">${r.net>0?"+":""}${eur(r.net)}</dd>
+    </dl>
+    <p class="note" style="margin:10px 0 0">Если бы платили все — ${r.ideal>0?"+":""}${eur(r.ideal)}. ${be!=null?`В ноль выходим при ${be}% оплаты.`:""}${r.depSpent?" Залога за тару ушло "+eur(r.depSpent)+" — вернётся при сдаче.":""}</p>`;
+}
+
 function renderMenu(M){
   const all = sorted();
   const cnt = f => all.filter(p => M.items[p.id].st === f).length;
@@ -116,18 +156,20 @@ function renderMenu(M){
 
   let html = "";
   const r = M.lastRec;
-  if(r) html += `<div class="panel pad" style="margin-top:14px"><div class="hist"><div class="h" style="margin:0"><b>Период ${ddmm(r.from.date)} – ${ddmm(r.to.date)}</b><span class="pill ${r.diff>=0?"green":"red"} num">${r.diff>0?"+":""}${eur(r.diff)}</span></div></div>
-    <div class="note">Выпито платных ${r.saleUnits} шт · должно быть ${eur(r.expected)} · пришло ${eur(r.got)}</div></div>`;
+  if(r) html += `<button class="panel pad banner" id="moneyCard" style="margin-top:14px">
+    <div class="h"><b>Период ${ddmm(r.from.date)} – ${ddmm(r.to.date)}</b><span class="pill ${r.net>=0?"green":"red"} num">${r.net>0?"+":""}${eur(r.net)}</span></div>
+    <div class="note">Недобор ${eur(r.short)} · вода ${eur(r.costWater)}${r.payRate!=null?" · оплачено "+Math.round(r.payRate*100)+"%":""}</div></button>`;
 
   for(const cat of ["sale","free","shared"]){
     let ps = all.filter(p => p.cat===cat);
     if(S.filter !== "all") ps = ps.filter(p => M.items[p.id].st === S.filter);
+    ps = ps.filter(p => M.items[p.id].restock || Math.round(M.items[p.id].est) > 0);
     if(!ps.length) continue;
     html += `<h2 class="sec">${CAT[cat]}<em>${ps.length} ${plural(ps.length,"позиция","позиции","позиций")}</em></h2><div class="grid">`;
     for(const p of ps){
       const it = M.items[p.id], out = Math.round(it.est) <= 0;
       html += `<button class="card ${out?"out":""}" data-p="${esc(p.id)}">
-        <div class="thumb">${pic(p)}${flag(it)}${out?`<span class="stamp"><span>Нет на складе</span></span>`:""}</div>
+        <div class="thumb">${pic(p)}${flag(it,p)}${out && it.restock?`<span class="stamp"><span>Нет на складе</span></span>`:""}</div>
         <div class="cb"><div class="nm">${esc(p.name)}</div><div class="vol">${esc(p.vol||"")}</div>
         <div class="foot">${stockLine(it)}${tagFor(p)}</div></div></button>`;
     }
@@ -148,11 +190,12 @@ function renderBuy(M){
   else {
     for(const p of needs){ const it = M.items[p.id];
       h += `<div class="row"><div class="mini">${pic(p)}</div><div class="info"><div class="nm">${esc(p.name)}</div>
-        <div class="sub2 num">${Math.round(it.est)} шт${p.pack?" · уп. "+p.pack:""}${p.cost?" · ~"+eur(it.need*p.cost):""}</div></div>
+        <div class="sub2 num">${Math.round(it.est)} шт${p.pack?" · уп. "+p.pack:""}${p.cost?" · ~"+eur(it.need*(p.cost+(+p.dep||0))):""}</div></div>
         <span class="pill ${it.st==="green"?"ink":it.st} num">+${it.need}</span></div>`;
     }
-    const tot = needs.reduce((s,p)=> s + (p.cost ? M.items[p.id].need*p.cost : 0), 0);
-    h += `<div class="row"><div class="info"><div class="nm">Примерно по последним ценам</div><div class="sub2">без НДС, залог ${eur(C.DEPOSIT)} уже внутри</div></div><b class="num">${eur(tot)}</b></div></div>
+    const goods = needs.reduce((s,p)=> s + (p.cost ? M.items[p.id].need*p.cost : 0), 0);
+    const deps  = needs.reduce((s,p)=> s + M.items[p.id].need*(+p.dep||0), 0);
+    h += `<div class="row"><div class="info"><div class="nm">Взять с собой</div><div class="sub2">товар ${eur(goods)} с НДС + залог ${eur(deps)}</div></div><b class="num">${eur(goods+deps)}</b></div></div>
       <button class="btn ghost" id="fillNeed" style="margin-top:10px">Перенести в закупку</button>`;
   }
   if(!needs.length) h += `</div>`;
@@ -197,16 +240,18 @@ function renderCount(M){
 function previewCount(M){
   const el = $("#preview"); if(!el || !M) return;
   if(!M.last){ el.innerHTML = `<div class="note">Это первый подсчёт — он станет точкой отсчёта.</div>`; return }
-  let units = 0, free = 0;
+  let units = 0, free = 0, costSale = 0, costWater = 0, depSpent = 0;
   for(const p of sorted()){
     const base = M.last.stock?.[p.id]; if(base == null) continue;
     const c = base + M.items[p.id].bought - (S.count[p.id]||0);
-    if(p.cat==="sale") units += c; if(p.cat==="free") free += c;
+    if(p.cat === "sale"){ units += c; if(p.cost != null) costSale  += c*p.cost }
+    if(p.cat === "free"){ free  += c; if(p.cost != null) costWater += c*p.cost }
+    depSpent += M.items[p.id].bought * (+p.dep || 0);
   }
-  const exp = units*SALE, got = num($("#cCash")?.value) + num($("#cCard")?.value), d = got - exp;
-  el.innerHTML = `<dl class="recon num"><dt>Выпито платных</dt><dd>${units} шт</dd><dt>Воды выпито</dt><dd>${free} шт</dd>
-    <dt>Должно быть (× ${eur(SALE)})</dt><dd>${eur(exp)}</dd><dt>Пришло: касса + карта</dt><dd>${eur(got)}</dd>
-    <dt class="tot">Разница</dt><dd class="tot ${d>=0?"pos":"neg"}">${d>0?"+":""}${eur(d)}${exp>0&&d<0?" · "+Math.round(-d/exp*100)+"% не оплачено":""}</dd></dl>`;
+  const exp = units*SALE, got = num($("#cCash")?.value) + num($("#cCard")?.value);
+  el.innerHTML = money({saleUnits:units, freeUnits:free, expected:exp, got, short:got-exp,
+    costSale, costWater, depSpent, net:got-costSale-costWater, ideal:exp-costSale-costWater,
+    payRate: exp>0?got/exp:null, breakEven: exp>0?(costSale+costWater)/exp:null});
 }
 
 /* ---------- история ---------- */
@@ -220,10 +265,9 @@ function renderHist(M){
   for(const e of ev){
     if(e.t === "rec"){ const r = e.r;
       const top = Object.entries(r.cons).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([k,v])=>`${esc(name(k))} ${v}`).join(" · ");
-      h += `<div class="panel pad"><div class="h"><b>Подсчёт ${ddmm(r.to.date)}</b><span class="pill ${r.diff>=0?"green":"red"} num">${r.diff>0?"+":""}${eur(r.diff)}</span></div>
-        <dl class="recon num"><dt>Период</dt><dd>${ddmm(r.from.date)}–${ddmm(r.to.date)} · ${Math.round(r.days)} дн.</dd>
-        <dt>Выпито платных</dt><dd>${r.saleUnits} шт</dd><dt>Должно быть</dt><dd>${eur(r.expected)}</dd>
-        <dt>Пришло</dt><dd>${eur(r.got)}</dd></dl><p class="note" style="margin:10px 0 0">${top}</p>
+      h += `<div class="panel pad"><div class="h"><b>Подсчёт ${ddmm(r.to.date)}</b><span class="pill ${r.net>=0?"green":"red"} num">${r.net>0?"+":""}${eur(r.net)}</span></div>
+        <p class="note" style="margin:0 0 10px">${ddmm(r.from.date)}–${ddmm(r.to.date)} · ${Math.round(r.days)} дн.</p>
+        ${money(r)}<p class="note" style="margin:10px 0 0">${top}</p>
         <div style="text-align:right;margin-top:6px">${r.to.by?`<span class="note">считал(а): ${esc(r.to.by)}</span>`:""} <button class="del" data-del="counts/${esc(r.to.id)}">удалить</button></div></div>`;
     } else if(e.t === "buy"){ const p = e.p;
       const list = Object.entries(p.items||{}).filter(([,v])=>v>0).map(([k,v])=>`${esc(name(k))} +${v}`).join(" · ");
@@ -241,7 +285,10 @@ function renderHist(M){
 /* ---------- карточка товара ---------- */
 function sheet(p){
   const it = S.M.items[p.id];
+  const dep  = +p.dep || 0;
   const marg = p.cat==="sale" && p.cost != null ? SALE - p.cost : null;
+  const buyLine = p.cost == null ? "цена закупки не заполнена"
+    : `закупка ${eur(p.cost)} с НДС` + (dep ? ` · в магазине ${eur(p.cost+dep)} с залогом` : "") + (marg != null ? ` · маржа +${eur(marg)}` : "");
   const n = Math.round(it.est);
   const kv = (l,v,cls) => `<div><small>${l}</small><b class="${cls||""}">${v}</b></div>`;
 
@@ -269,7 +316,7 @@ function sheet(p){
       <div class="meta">${esc(p.vol||"")} · ${CAT[p.cat]}</div>
       <div class="priceline">
         <b class="num">${p.cat==="sale" ? eur(SALE) : p.cat==="free" ? "бесплатно" : "не продаётся"}</b>
-        <span class="buy num">${p.cost != null ? "закупка "+eur(p.cost)+(marg!=null?" · маржа +"+eur(marg):"") : "цена закупки не заполнена"}</span>
+        <span class="buy num">${buyLine}</span>
       </div>
       <div class="kv num">
         ${kv("Остаток", (it.estimated?"≈ ":"")+n+" шт", it.st!=="green"?it.st:"")}
@@ -280,8 +327,11 @@ function sheet(p){
       <div class="blk"><h4>Среднее использование</h4>${use}</div>
       ${p.note ? `<div class="blk"><h4>Закупка</h4><p class="note" style="margin:0">${esc(p.note)}</p></div>` : ""}
       <div class="blk"><h4>Поправить</h4>
-        <div class="fields"><div class="field"><label for="edCost">Закупка за шт, € (с залогом)</label><input id="edCost" inputmode="decimal" value="${p.cost ?? ""}"></div>
-        <div class="field"><label for="edMin">Мин. остаток, шт</label><input id="edMin" inputmode="numeric" value="${p.min ?? ""}"></div></div></div>
+        <div class="fields"><div class="field"><label for="edCost">Закупка за шт, € с НДС</label><input id="edCost" inputmode="decimal" value="${p.cost ?? ""}"></div>
+        <div class="field"><label for="edDep">Залог за тару, €</label><input id="edDep" inputmode="decimal" value="${p.dep ?? ""}"></div>
+        <div class="field"><label for="edMin">Мин. остаток, шт</label><input id="edMin" inputmode="numeric" value="${p.min ?? ""}"></div></div>
+        <label class="chk"><input type="checkbox" id="edPhase" ${p.phaseout?"checked":""}><span><b>Распродаём</b> — допиваем остаток, больше не докупаем</span></label>
+      </div>
       <div class="fields" style="margin-top:16px"><button class="btn ghost" id="edClose" style="flex:1">Закрыть</button><button class="btn" id="edSave" style="flex:1">Сохранить</button></div>
       <div style="text-align:center"><button class="del" id="edHide" style="margin-top:12px">убрать из меню</button></div>
     </div></div>`;
@@ -294,7 +344,11 @@ function sheet(p){
   bg.querySelector("#edClose").onclick = close;
   bg.querySelector("#edSave").onclick = async () => {
     try{
-      await apply(API.updateProduct(p.id, {cost: num(bg.querySelector("#edCost").value) || null, min: parseInt(bg.querySelector("#edMin").value) || null}));
+      await apply(API.updateProduct(p.id, {
+        cost: num(bg.querySelector("#edCost").value) || null,
+        dep:  num(bg.querySelector("#edDep").value) || 0,
+        min:  parseInt(bg.querySelector("#edMin").value) || null,
+        phaseout: bg.querySelector("#edPhase").checked }));
       toast("Сохранено"); close();
     }catch(e){ toast("Не сохранилось: "+e.message) }
   };
@@ -303,6 +357,29 @@ function sheet(p){
     if(!hb.classList.contains("armed")){ hb.classList.add("armed"); hb.textContent = "точно убрать? нажми ещё раз"; return }
     try{ await apply(API.updateProduct(p.id, {hidden:true})); toast("Убрано из меню"); close() }catch(e){ toast("Ошибка: "+e.message) }
   };
+}
+
+function moneySheet(r){
+  if(!r) return;
+  const bg = document.createElement("div");
+  bg.className = "sheet-bg";
+  bg.innerHTML = `<div class="sheet" role="dialog" aria-label="Деньги за период">
+    <div class="grab"><i></i></div>
+    <div class="body">
+      <h3>Деньги за период</h3>
+      <div class="meta">${ddmm(r.from.date)} – ${ddmm(r.to.date)} · ${Math.round(r.days)} дн.</div>
+      <div style="margin-top:16px">${money(r)}</div>
+      <div class="blk"><h4>Как это считается</h4><p class="note" style="margin:0">
+        Недобор — только по платным напиткам: сколько должны были занести против того, что занесли.
+        Вода бесплатная, деньги за неё не вернутся никогда, поэтому она стоит отдельной строкой расхода, а не в недоборе.
+        Залог за тару в расход не идёт — это возвратные деньги, они лежат в пустой таре.</p></div>
+      <button class="btn ghost" id="mClose" style="margin-top:16px">Закрыть</button>
+    </div></div>`;
+  document.body.appendChild(bg);
+  const close = () => { bg.remove(); TG?.BackButton?.hide() };
+  TG?.BackButton?.show(); TG?.BackButton?.onClick(close);
+  bg.addEventListener("click", e => { if(e.target === bg) close() });
+  bg.querySelector("#mClose").onclick = close;
 }
 
 /* ---------- каркас ---------- */
@@ -337,6 +414,7 @@ document.addEventListener("click", async e => {
   if(t){ S.tab = t.dataset.tab; document.querySelectorAll(".tab").forEach(x => x.setAttribute("aria-selected", x === t)); if(S.tab === "count") S.count = null; haptic("light"); render(); scrollTo(0,0); return }
   const f = e.target.closest("[data-f]"); if(f){ S.filter = f.dataset.f; haptic("light"); render(); return }
   const c = e.target.closest(".card[data-p]"); if(c){ const p = S.products.find(x => x.id === c.dataset.p); if(p) sheet(p); return }
+  if(e.target.closest("#moneyCard")){ moneySheet(S.M.lastRec); return }
   const s = e.target.closest(".step button");
   if(s){ const inp = s.parentElement.querySelector("input"), v = Math.max(0,(parseInt(inp.value)||0) + (+s.dataset.d)); inp.value = v; setVal(inp.dataset.k, s.dataset.id, v); haptic("light"); return }
   if(e.target.id === "fillNeed"){ for(const p of S.products){ const n = S.M.items[p.id]?.need; if(n) S.buy[p.id] = n } render(); toast("Список перенесён — поправь по чеку"); return }

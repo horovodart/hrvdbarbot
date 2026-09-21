@@ -170,3 +170,13 @@ svg.fb{display:none}
 .cb .nm{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .cb .vol{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
 .cb .foot{margin-top:auto;padding-top:9px}
+
+/* «распродаём», кликабельный баннер денег, чекбокс */
+.flag.grey{background:var(--soft);color:var(--ink-2)}
+.banner{display:block;width:100%;text-align:left;border:1px solid var(--line);cursor:pointer;font:inherit;color:inherit}
+.banner .h{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin:0 0 6px}
+.banner .h b{font-weight:700}
+.banner:active{transform:scale(.99)}
+.chk{display:flex;gap:10px;align-items:flex-start;margin-top:14px;cursor:pointer;font-size:13.5px;line-height:1.4}
+.chk input{width:20px;height:20px;flex:none;accent-color:var(--accent);margin:1px 0 0}
+.chk b{font-weight:600}
