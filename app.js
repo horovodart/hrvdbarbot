@@ -64,9 +64,18 @@ function model(){
     const backed = S.returns.filter(r => r.toTill && r.date > a.date && r.date <= b.date)
                             .reduce((s,r) => s + (+r.amount||0), 0);
     const buys = purch.filter(x => x.date > a.date && x.date <= b.date).length;
-    const expected = saleUnits*SALE, got = (+b.cash||0) + (+b.card||0) - backed;
+    // Если подсчёт сохранён приложением, деньги периода взяты из него и больше не
+    // пересчитываются: правка цены сегодня не должна переписывать прошлый месяц.
+    const fz = b.frozen && typeof b.frozen === "object" ? b.frozen : null;
+    if(fz){
+      if(fz.costSale  != null) costSale  = +fz.costSale;
+      if(fz.costWater != null) costWater = +fz.costWater;
+      if(fz.depSpent  != null) depSpent  = +fz.depSpent;
+    }
+    const price = fz?.price != null ? +fz.price : SALE;
+    const expected = saleUnits*price, got = (+b.cash||0) + (+b.card||0) - backed;
     recs.push({id:b.id, from:a, to:b, days:days(a.date,b.date), cons, meas, bought, saleUnits, freeUnits, backed, buys,
-      expected, got, short: got-expected, costSale, costWater, depSpent,
+      frozen:!!fz, price, expected, got, short: got-expected, costSale, costWater, depSpent,
       net: got - costSale - costWater,          // реальный итог: пришло минус всё, что купили
       ideal: expected - costSale - costWater,   // если бы платили все
       payRate:   expected > 0 ? got/expected : null,
@@ -138,7 +147,15 @@ function model(){
   tare.paid = paid;
   tare.back = back;
 
-  return {counts, purch, recs, last, lastRec:recs[recs.length-1], items, dSince, tare};
+  // накопительный счёт за всё время: он и есть «карма»
+  const all = recs.reduce((o,r) => ({expected:o.expected+r.expected, got:o.got+r.got,
+    cost:o.cost+r.costSale+r.costWater, units:o.units+r.saleUnits}),
+    {expected:0, got:0, cost:0, units:0});
+  all.short = all.got - all.expected;
+  all.net   = all.got - all.cost;
+  all.payRate = all.expected > 0 ? all.got/all.expected : null;
+
+  return {counts, purch, recs, last, lastRec:recs[recs.length-1], items, dSince, tare, all};
 }
 
 /* ---------- меню ---------- */
@@ -165,7 +182,7 @@ function money(r){
   const be  = r.breakEven != null && isFinite(r.breakEven) ? Math.round(r.breakEven*100) : null;
   return `<dl class="recon num">
       <dt>Выпито платных</dt><dd>${r.saleUnits} шт</dd>
-      <dt>Должно быть (× ${eur(SALE)})</dt><dd>${eur(r.expected)}</dd>
+      <dt>Должно быть (× ${eur(r.price ?? SALE)})</dt><dd>${eur(r.expected)}</dd>
       <dt>Пришло за напитки</dt><dd>${eur(r.got)}</dd>
       ${r.backed ? `<dt>вычтен возврат залога</dt><dd>−${eur(r.backed)}</dd>` : ""}
       <dt class="tot">Недобор</dt><dd class="tot ${r.short>=0?"pos":"neg"}">${r.short>0?"+":""}${eur(r.short)}${pct!=null?" · оплачено "+pct+"%":""}</dd>
@@ -262,6 +279,7 @@ function renderBuy(M){
     <div class="field"><label for="npShape">Тара</label><select id="npShape"><option value="bottle">Стекло</option><option value="can">Банка</option><option value="pet">ПЭТ</option><option value="water">Вода</option><option value="capsule">Капсула</option></select></div></div>
     <div class="fields"><div class="field"><label for="npCost">Закупка за шт, €</label><input id="npCost" inputmode="decimal"></div><div class="field"><label for="npPack">Упаковка, шт</label><input id="npPack" inputmode="numeric" value="6"></div>
     <div class="field"><label for="npDep">Залог, €</label><input id="npDep" inputmode="decimal" value="0,15"></div>
+    <div class="field"><label for="npMin">Мин. остаток, шт</label><input id="npMin" inputmode="numeric" value="6"></div>
     <div class="field"><label for="npColor">Цвет</label><input id="npColor" type="color" value="#2F8F5B" style="padding:4px;height:46px"></div></div>
     <button class="btn ghost" id="npAdd">Добавить в меню</button></div></details>`;
   return h;
@@ -482,6 +500,14 @@ function moneySheet(r){
       <h3>Деньги за период</h3>
       <div class="meta">${ddmm(r.from.date)} – ${ddmm(r.to.date)} · ${Math.round(r.days)} дн.</div>
       <div style="margin-top:16px">${money(r)}</div>
+      ${S.M.recs.length > 1 ? `<div class="blk"><h4>За всё время</h4>
+        <dl class="recon num">
+          <dt>Выпито платных</dt><dd>${S.M.all.units} шт</dd>
+          <dt>Должно было прийти</dt><dd>${eur(S.M.all.expected)}</dd>
+          <dt>Пришло</dt><dd>${eur(S.M.all.got)}${S.M.all.payRate!=null?" · "+Math.round(S.M.all.payRate*100)+"%":""}</dd>
+          <dt>Потрачено на напитки</dt><dd>−${eur(S.M.all.cost)}</dd>
+          <dt class="tot">Бар в сумме</dt><dd class="tot ${S.M.all.net>=0?"pos":"neg"}">${S.M.all.net>0?"+":""}${eur(S.M.all.net)}</dd>
+        </dl></div>` : ""}
       <div class="blk"><h4>Куда ушли деньги на бесплатное</h4>
         <dl class="recon num">${S.products.filter(p => isFree(p.cat) && r.cons[p.id] > 0)
           .sort((x,y) => (r.cons[y.id]*(y.cost||0)) - (r.cons[x.id]*(x.cost||0)))
@@ -585,7 +611,20 @@ async function saveCount(){
   }
   const b = $("#dockBtn"); b.disabled = true;
   try{
-    await apply(API.addCount({date:new Date().toISOString(), stock, cash:num($("#cCash").value), card:num($("#cCard").value), by:$("#cWho").value.trim()||null}));
+    // вместе с остатками сохраняем деньги периода как факт, а не как формулу
+    const M = S.M, base = M.last?.stock || {};
+    let saleU = 0, freeU = 0, cSale = 0, cWater = 0, dep = 0;
+    for(const p of sorted()){
+      dep += (M.items[p.id]?.bought || 0) * (+p.dep || 0);
+      if(base[p.id] == null || stock[p.id] == null) continue;
+      const c = base[p.id] + (M.items[p.id]?.bought || 0) - stock[p.id];
+      if(p.cat === "sale"){ saleU += c; if(p.cost != null) cSale += c*p.cost }
+      if(isFree(p.cat)){ freeU += c; if(p.cost != null) cWater += c*p.cost }
+    }
+    await apply(API.addCount({date:new Date().toISOString(), stock,
+      cash:num($("#cCash").value), card:num($("#cCard").value), by:$("#cWho").value.trim()||null,
+      frozen:{price:SALE, saleUnits:saleU, freeUnits:freeU, costSale:+cSale.toFixed(4),
+              costWater:+cWater.toFixed(4), depSpent:+dep.toFixed(4)}}));
     S.count = null; S.f.cCash = S.f.cCard = ""; toast("Подсчёт сохранён"); haptic("medium");
     S.tab = "hist"; document.querySelectorAll(".tab").forEach(x => x.setAttribute("aria-selected", x.dataset.tab === "hist")); render(); scrollTo(0,0);
   }catch(e){ toast("Не сохранилось: "+e.message); b.disabled = false }
@@ -602,7 +641,8 @@ async function addProduct(){
     await apply(API.addProduct(id, {name, vol:$("#npVol").value.trim(), cat, shape:$("#npShape").value,
       cost:num($("#npCost").value)||null, dep:num($("#npDep").value)||0,
       pack:parseInt($("#npPack").value)||null, color:$("#npColor").value,
-      order: cat==="sale"?50:isFree(cat)?70:90, min: cat==="shared"?1:6}));
+      order: cat==="sale"?50:isFree(cat)?70:90,
+      min: parseInt($("#npMin").value) || (cat==="shared"?1:6), phaseout:false, hidden:false}));
     toast("Добавлено в меню");
   }catch(e){ toast("Не сохранилось: "+e.message) }
 }
