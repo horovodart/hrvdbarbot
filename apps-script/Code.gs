@@ -298,10 +298,25 @@ function syncProducts(){
   seedReturns();
   syncSeeded('counts');        // опорные подсчёты правим вместе со справочником:
   syncSeeded('purchases');     // без этого у новых товаров нет остатка и они прячутся
+  retireSeeded();              // и убираем то, что из кода уже удалили
   props.setProperty('SEED_VERSION', String(SEED_VERSION));
 }
 
 
+
+/**
+ * Убирает строки, заведённые из кода и с тех пор отменённые.
+ * Синк обновляет по id и ничего не удаляет, поэтому переименованная или
+ * пересмотренная запись иначе остаётся в листе и задваивает итоги.
+ */
+function retireSeeded(){
+  if (typeof SEED_RETIRE === 'undefined') return;
+  Object.keys(SEED_RETIRE).forEach(function(name){
+    SEED_RETIRE[name].forEach(function(id){
+      if (findRow(name, id) > 0) remove(name, id);
+    });
+  });
+}
 
 /** Историю сдачи тары до запуска приложения заносим один раз, из кода. */
 function seedReturns(){
