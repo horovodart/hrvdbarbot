@@ -6,6 +6,10 @@ import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import { newApp } from './gas-mock.mjs';
 
+/* Версия сида читается из Seed.gs, а не зашивается числом: иначе каждый её
+   подъём красит тесты, хотя ломаться нечему. */
+const SEEDV = String(newApp({}).api.SEED_VERSION);
+
 /* ---------------- мини-фреймворк ---------------- */
 
 let passed = 0, failed = 0;
@@ -100,8 +104,8 @@ G('1. syncProducts()');
 
 test('совпал SEED_VERSION — ни одного обращения к листу', () => {
   const sheets = bootedBook();
-  const { env, api } = newApp({ sheets, props: { SEED_VERSION: '13' } });
-  assert.equal(String(api.SEED_VERSION), '13', 'SEED_VERSION в Seed.gs изменился — поправь тест');
+  const { env, api } = newApp({ sheets, props: { SEED_VERSION: SEEDV } });
+  assert.ok(/^\d+$/.test(SEEDV) && +SEEDV > 0, 'версия сида в Seed.gs — целое число, а не ' + SEEDV);
   env.stats.reset();
   api.syncProducts();
   assert.equal(env.stats.total, 0,
@@ -729,7 +733,7 @@ G('9. handle()');
 
 function readyApp(props) {
   const sheets = bootedBook();
-  return newApp({ sheets, props: Object.assign({ SEED_VERSION: '13', BOT_TOKEN: TOKEN }, props || {}) });
+  return newApp({ sheets, props: Object.assign({ SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN }, props || {}) });
 }
 
 test('list берёт и отпускает замок', () => {
@@ -813,7 +817,7 @@ function parseOut(out) { return JSON.parse(out.getContent()); }
 
 test('при совпадении SEED_VERSION не трогает листы и отвечает alive:true, synced:false', () => {
   const sheets = bootedBook();
-  const { env, api } = newApp({ sheets, props: { SEED_VERSION: '13', BOT_TOKEN: TOKEN } });
+  const { env, api } = newApp({ sheets, props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
   env.stats.reset();
   const out = api.doGet({ parameter: {} });
   assert.equal(env.stats.total, 0, 'обращений к листам: ' + env.stats.total + ' — ' + env.stats.log.slice(0, 8).join(','));
@@ -826,7 +830,7 @@ test('при совпадении SEED_VERSION не трогает листы и
 
 test('данных склада не отдаёт ни при каких параметрах', () => {
   const sheets = bootedBook();
-  const { env, api } = newApp({ sheets, props: { SEED_VERSION: '13', BOT_TOKEN: TOKEN } });
+  const { env, api } = newApp({ sheets, props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
   [{}, { parameter: { action: 'list' } }, { parameter: { action: 'list', col: 'products' } },
    { parameter: { initData: 'что угодно' } }, undefined].forEach(e => {
     const j = parseOut(api.doGet(e));
@@ -842,7 +846,7 @@ test('при новой версии синкает и говорит synced:tru
   const { env, api } = newApp({ sheets, props: { SEED_VERSION: '11', BOT_TOKEN: TOKEN } });
   const j = parseOut(api.doGet({}));
   assert.equal(j.data.synced, true, 'синк прошёл');
-  assert.equal(env.props.SEED_VERSION, '13', 'версия записана в свойства');
+  assert.equal(env.props.SEED_VERSION, SEEDV, 'версия записана в свойства');
   assert.equal(env.lockCalls.held, 0, 'замок отпущен');
 });
 
@@ -856,7 +860,7 @@ test('если замок занят — тихо уходит без синка
 });
 
 test('ответ — валидный JSON в ASCII с mime application/json', () => {
-  const { env, api } = newApp({ props: { SEED_VERSION: '13' }, sheets: bootedBook() });
+  const { env, api } = newApp({ props: { SEED_VERSION: SEEDV }, sheets: bootedBook() });
   const out = api.doGet({});
   assert.equal(out._mime, 'application/json', 'mime');
   assert.ok(!/[-￿]/.test(out.getContent()), 'всё не-ASCII ушло как \\uXXXX');
