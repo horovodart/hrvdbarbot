@@ -121,12 +121,16 @@ function allowed(id, user){
 /* ---------------- действия ---------------- */
 
 function handle(action, p, user){
-  // list тоже под замком: иначе два одновременных запроса запускают синк дважды
   var lock = LockService.getScriptLock();
-  lock.waitLock(30000);
   if (action === 'list'){
+    // Замок нужен, только если чтение может что-то записать: первый запуск или
+    // разъехавшийся сид. Иначе двое открывших приложение одновременно вставали в
+    // очередь по 30 секунд — со стороны это выглядело как «грузится вечно».
+    if (!needSeed() && sheet('products').getLastRow() > 1) return listAll();
+    lock.waitLock(30000);
     try { return listAll() } finally { lock.releaseLock() }
   }
+  lock.waitLock(30000);
   try {
     var who = user ? user.name : null;
     if (action === 'addPurchase'){
@@ -156,7 +160,9 @@ function handle(action, p, user){
 
 function listAll(){
   if (sheet('products').getLastRow() < 2) setup();   // первый запуск — заливаем стартовые данные сами
-  else { try { syncProducts(); syncTeam() } catch (e) { /* склад важнее синка справочника */ } }
+  // syncTeam раньше выполнялся на каждое чтение: это лишние записи в лист на
+  // ровном месте. Справочник трогаем только когда сид действительно разъехался.
+  else if (needSeed()) { try { syncProducts(); syncTeam() } catch (e) { /* склад важнее синка справочника */ } }
   var out = {};
   ['products','counts','purchases','returns'].forEach(function(name){
     var o = {};
@@ -264,9 +270,14 @@ function setup(){
  * Цены, поправленные в приложении, синк перезапишет: справочник в коде главнее.
  * Флаг «распродаём» синк не трогает — это решение команды, а не настройка.
  */
+// Сид разъехался с таблицей? Только тогда имеет смысл что-то писать.
+function needSeed(){
+  return String(PropertiesService.getScriptProperties().getProperty('SEED_VERSION')) !== String(SEED_VERSION);
+}
+
 function syncProducts(){
   var props = PropertiesService.getScriptProperties();
-  if (String(props.getProperty('SEED_VERSION')) === String(SEED_VERSION)) return;
+  if (!needSeed()) return;
   ensureCols('products');
 
   // Лист переписывается целиком за одно чтение и одну запись: по ячейке выходило

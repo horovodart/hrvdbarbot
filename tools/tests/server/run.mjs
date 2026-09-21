@@ -736,15 +736,35 @@ function readyApp(props) {
   return newApp({ sheets, props: Object.assign({ SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN }, props || {}) });
 }
 
-test('list берёт и отпускает замок', () => {
+test('list не берёт замок, когда синкать нечего', () => {
+  // Замок на чтении ставил читающих в очередь за пишущими: двое открывших
+  // приложение одновременно ждали до 30 секунд каждый.
   const { env, api } = readyApp();
-  const before = env.lockCalls.releaseLock;
   const out = api.handle('list', {}, { id: '1', name: 'Миша' });
-  assert.equal(env.lockCalls.waitLock, 1, 'замок взят');
-  assert.equal(env.lockCalls.releaseLock, before + 1, 'замок отпущен');
+  assert.equal(env.lockCalls.waitLock, 0, 'замок не брался');
   assert.equal(env.lockCalls.held, 0, 'замок не остался висеть');
   assert.ok(out.products && out.counts && out.purchases && out.returns, 'вернулись все четыре раздела');
   assert.equal(Object.keys(out.products).length, 51, '51 товар');
+});
+
+test('list берёт и отпускает замок, когда сид разъехался', () => {
+  const { env, api } = newApp({ sheets: bootedBook(), props: { SEED_VERSION: '1', BOT_TOKEN: TOKEN } });
+  const before = env.lockCalls.releaseLock;
+  const out = api.handle('list', {}, { id: '1', name: 'Миша' });
+  assert.equal(env.lockCalls.waitLock, 1, 'замок взят: чтение будет писать');
+  assert.equal(env.lockCalls.releaseLock, before + 1, 'замок отпущен');
+  assert.equal(env.lockCalls.held, 0, 'замок не остался висеть');
+  assert.equal(String(env.props.SEED_VERSION), SEEDV, 'версия сида обновилась');
+  assert.equal(Object.keys(out.products).length, 51, '51 товар');
+});
+
+test('list не трогает лист team, когда синкать нечего', () => {
+  // syncTeam выполнялся на каждое чтение — лишние записи в лист на ровном месте
+  const { env, api } = readyApp();
+  env.stats.reset();
+  api.handle('list', {}, { id: '1', name: 'Миша' });
+  const team = env.stats.log.filter(x => String(x).indexOf('team') >= 0);
+  assert.equal(team.length, 0, 'обращений к team быть не должно, а было: ' + team.join(', '));
 });
 
 test('производительность: обращений к листу на один list', () => {
