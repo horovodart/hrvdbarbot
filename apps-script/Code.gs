@@ -125,6 +125,7 @@ function handle(action, p, user){
 function listAll(){
   if (sheet('products').getLastRow() < 2) setup();   // первый запуск — заливаем стартовые данные сами
   else { syncProducts(); syncTeam() }                 // новая версия справочника — обновляем товары и команду
+  try { ensureTriggers() } catch (e) { /* не критично: напоминание просто не встанет */ }
   var out = {};
   ['products','counts','purchases','returns'].forEach(function(name){
     var o = {};
@@ -265,6 +266,47 @@ function ensureCols(name){
   var head = sh.getRange(1, 1, 1, last).getValues()[0];
   var add = COLS[name].filter(function(c){ return head.indexOf(c) < 0 });
   if (add.length) sh.getRange(1, last + 1, 1, add.length).setValues([add]);
+}
+
+/* ---------------- ежевечернее напоминание ----------------
+ * Живёт на серверах Google: работает, даже когда все компьютеры выключены.
+ * Раз в сутки проверяет, у каких позиций нет фото, и пишет об этом в Telegram.
+ * Само фото не добавляет — кадр всё равно нужно выбрать глазами.
+ */
+var SITE = 'https://horovodart.github.io/hrvdbarbot/';
+
+function notifyMissingPhotos(){
+  var token = prop('BOT_TOKEN'); if (!token) return;
+  var chat  = prop('NOTIFY_CHAT') || (typeof TEAM_SEED !== 'undefined' && TEAM_SEED[0] && TEAM_SEED[0].id);
+  if (!chat) return;
+  var gone = [];
+  rows('products').forEach(function(p){
+    if (p.hidden) return;
+    try {
+      var r = UrlFetchApp.fetch(SITE + 'img/' + p.id + '.webp', {muteHttpExceptions:true});
+      if (r.getResponseCode() !== 200) gone.push('• ' + p.name + (p.vol ? ' · ' + p.vol : ''));
+    } catch (e) { /* сеть моргнула — просто пропускаем позицию */ }
+  });
+  if (!gone.length) return;                       // всё на месте — молчим
+  var text = 'Бар HUB: без фото ' + gone.length + ' ' +
+             (gone.length % 10 === 1 && gone.length % 100 !== 11 ? 'позиция' : 'позиций') + '\n\n' +
+             gone.slice(0, 25).join('\n') +
+             (gone.length > 25 ? '\n… и ещё ' + (gone.length - 25) : '');
+  UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify({chat_id: chat, text: text, disable_notification: true})
+  });
+}
+
+/** Ставит ежедневный триггер один раз — при первом же запросе после деплоя. */
+function ensureTriggers(){
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('TRIGGERS_V') === '1') return;
+  ScriptApp.getProjectTriggers().forEach(function(t){
+    if (t.getHandlerFunction() === 'notifyMissingPhotos') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('notifyMissingPhotos').timeBased().atHour(22).nearMinute(30).everyDays(1).create();
+  props.setProperty('TRIGGERS_V', '1');
 }
 
 /** Проверка без Telegram: выполни в редакторе и посмотри лог. */
