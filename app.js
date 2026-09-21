@@ -2,7 +2,9 @@
 (function(){
 const C = window.HUB_CONFIG, TG = window.Telegram?.WebApp;
 const SALE = C.SALE_PRICE, HORIZON = C.HORIZON, AMBER = C.AMBER, TARGET = C.TARGET;
-const CAT = {sale:"По 1,50 €", free:"Бесплатно · вода и снеки", shared:"Общие · не продаются"};
+const CAT = {sale:"По 1,50 €", water:"Вода · бесплатно", snack:"Снеки · бесплатно", shared:"Общие · не продаются"};
+const CATS = ["sale","water","snack","shared"];
+const isFree = c => c === "water" || c === "snack";   // купили и раздали — деньги не вернутся
 const S = {products:[], counts:[], purchases:[], returns:[], tab:"menu", filter:"all", buy:{}, count:null, f:{}, M:null, loaded:false};
 
 const $  = s => document.querySelector(s);
@@ -45,14 +47,14 @@ function model(){
       // «измерено» только если позиция реально двигалась: иначе это не ноль расхода, а отсутствие данных
       meas[p.id] = (bought[p.id]||0) > 0 || v > 0;
       if(p.cat==="sale") saleUnits += v;
-      if(p.cat==="free") freeUnits += v;
+      if(isFree(p.cat)) freeUnits += v;
     }
     let costSale = 0, costWater = 0, depSpent = 0;
     for(const p of S.products){
       const v = cons[p.id];
       if(v != null && p.cost != null){
         if(p.cat === "sale") costSale  += v*p.cost;
-        if(p.cat === "free") costWater += v*p.cost;
+        if(isFree(p.cat)) costWater += v*p.cost;
       }
       depSpent += (bought[p.id]||0) * (+p.dep || 0);
     }
@@ -149,7 +151,7 @@ function stockLine(it){
   return `<div class="stk ${it.st!=="green"?it.st:""}"><b class="num">${it.estimated?"≈":""}${n}</b><span>${t}</span></div>`;
 }
 const tagFor = p => p.cat==="sale" ? `<span class="tag num">${eur(SALE)}</span>`
-                  : p.cat==="free" ? `<span class="tag free">бесплатно</span>`
+                  : isFree(p.cat) ? `<span class="tag free">бесплатно</span>`
                   : `<span class="tag">общее</span>`;
 
 function money(r){
@@ -185,7 +187,7 @@ function renderMenu(M){
     <div class="h"><b>Период ${ddmm(r.from.date)} – ${ddmm(r.to.date)}</b><span class="pill ${r.net>=0?"green":"red"} num">${r.net>0?"+":""}${eur(r.net)}</span></div>
     <div class="note">Недобор ${eur(r.short)} · вода ${eur(r.costWater)}${r.payRate!=null?" · оплачено "+Math.round(r.payRate*100)+"%":""}</div></button>`;
 
-  for(const cat of ["sale","free","shared"]){
+  for(const cat of CATS){
     let ps = all.filter(p => p.cat===cat);
     if(S.filter !== "all") ps = ps.filter(p => M.items[p.id].st === S.filter);
     ps = ps.filter(p => M.items[p.id].restock || Math.round(M.items[p.id].est) > 0);
@@ -226,7 +228,7 @@ function renderBuy(M){
   if(!needs.length) h += `</div>`;
 
   h += `<h2 class="sec">Отметить закупку<em>плюсами — что купил</em></h2><div class="panel">`;
-  for(const cat of ["sale","free","shared"]) for(const p of all.filter(x=>x.cat===cat)){
+  for(const cat of CATS) for(const p of all.filter(x=>x.cat===cat)){
     h += `<div class="row"><div class="mini">${pic(p)}</div><div class="info"><div class="nm">${esc(p.name)}</div>
       <div class="sub2">${esc(p.vol||"")}${p.pack?" · упак. "+p.pack:""}</div></div>${stepper(p.id, S.buy[p.id]||0, "b")}</div>`;
   }
@@ -237,7 +239,7 @@ function renderBuy(M){
     <div class="field"><label for="buyWho">Кто купил</label><input id="buyWho" value="${esc(S.f.buyWho||"")}" placeholder="имя"></div></div>
   <details class="panel pad" style="margin-top:16px"><summary style="cursor:pointer;font-weight:600">+ Новый напиток</summary><div class="stack" style="margin-top:14px">
     <div class="fields"><div class="field"><label for="npName">Название</label><input id="npName" placeholder="Birell 0,0%"></div><div class="field"><label for="npVol">Объём</label><input id="npVol" placeholder="0,5 л, стекло"></div></div>
-    <div class="fields"><div class="field"><label for="npCat">Категория</label><select id="npCat"><option value="sale">По 1,50 €</option><option value="free">Бесплатно</option><option value="shared">Общие, не продаются</option></select></div>
+    <div class="fields"><div class="field"><label for="npCat">Категория</label><select id="npCat"><option value="sale">По 1,50 €</option><option value="water">Вода</option><option value="snack">Снеки</option><option value="shared">Общие, не продаются</option></select></div>
     <div class="field"><label for="npShape">Тара</label><select id="npShape"><option value="bottle">Стекло</option><option value="can">Банка</option><option value="pet">ПЭТ</option><option value="water">Вода</option><option value="capsule">Капсула</option></select></div></div>
     <div class="fields"><div class="field"><label for="npCost">Закупка за шт, €</label><input id="npCost" inputmode="decimal"></div><div class="field"><label for="npPack">Упаковка, шт</label><input id="npPack" inputmode="numeric" value="6"></div>
     <div class="field"><label for="npColor">Цвет</label><input id="npColor" type="color" value="#2F8F5B" style="padding:4px;height:46px"></div></div>
@@ -251,7 +253,7 @@ function renderCount(M){
   if(!S.count){ S.count = {}; for(const p of all) S.count[p.id] = Math.round(M.items[p.id].est) }
   let h = `<h2 class="sec">Подсчёт раз в 2 недели<em>${M.last ? "прошлый "+ddmm(M.last.date)+" · "+Math.floor(M.dSince)+" дн. назад" : ""}</em></h2>
     <p class="note" style="margin:0 0 12px">Посчитай холодильник и полки вместе. Поля заполнены расчётом — поправь на то, что видишь.</p><div class="panel">`;
-  for(const cat of ["sale","free","shared"]) for(const p of all.filter(x=>x.cat===cat)){
+  for(const cat of CATS) for(const p of all.filter(x=>x.cat===cat)){
     const it = M.items[p.id];
     h += `<div class="row"><div class="mini">${pic(p)}</div><div class="info"><div class="nm">${esc(p.name)}</div>
       <div class="sub2 num">было ${it.base ?? "—"}${it.bought?" + куплено "+it.bought:""}</div></div>${stepper(p.id, S.count[p.id] ?? 0, "c")}</div>`;
@@ -272,7 +274,7 @@ function previewCount(M){
     const base = M.last.stock?.[p.id]; if(base == null) continue;
     const c = base + M.items[p.id].bought - (S.count[p.id]||0);
     if(p.cat === "sale"){ units += c; if(p.cost != null) costSale  += c*p.cost }
-    if(p.cat === "free"){ free  += c; if(p.cost != null) costWater += c*p.cost }
+    if(isFree(p.cat)){ free  += c; if(p.cost != null) costWater += c*p.cost }
     depSpent += M.items[p.id].bought * (+p.dep || 0);
   }
   const exp = units*SALE, got = num($("#cCash")?.value) + num($("#cCard")?.value);
@@ -407,7 +409,7 @@ function tareSheet(M){
           ${M.tare.last ? `<dt>Последняя сдача</dt><dd>${ddmm(M.tare.last)}</dd>` : ""}
           <dt class="tot">Ждёт сдачи · примерно</dt><dd class="tot">${units(M.tare.waiting)} шт · ${eur(M.tare.waiting)}</dd>
         </dl>
-        <p class="note" style="margin:8px 0 0">«Ждёт сдачи» — залог за всё выпитое минус всё, что уже сдали. Цифра приблизительная: часть тары ещё стоит непустой, часть выбрасывают. Сверяется сама: сдал — она упала ровно на сумму из автомата.</p>
+        <p class="note" style="margin:8px 0 0">«Ждёт сдачи» — залог за всё выпитое минус всё, что уже сдали. Цифра приблизительная: часть тары ещё стоит непустой, часть выбрасывают, а иногда наоборот — гости и соседи приносят свои бутылки, и сдаётся больше выпитого. Сверяется сама: сдал — она упала ровно на сумму из автомата.</p>
       </div>
       <div class="fields" style="margin-top:16px"><button class="btn ghost" id="tClose" style="flex:1">Закрыть</button><button class="btn" id="tSave" style="flex:1">Записать</button></div>
     </div></div>`;
@@ -444,7 +446,7 @@ function moneySheet(r){
       <div class="meta">${ddmm(r.from.date)} – ${ddmm(r.to.date)} · ${Math.round(r.days)} дн.</div>
       <div style="margin-top:16px">${money(r)}</div>
       <div class="blk"><h4>Куда ушли деньги на бесплатное</h4>
-        <dl class="recon num">${S.products.filter(p => p.cat==="free" && r.cons[p.id] > 0)
+        <dl class="recon num">${S.products.filter(p => isFree(p.cat) && r.cons[p.id] > 0)
           .sort((x,y) => (r.cons[y.id]*(y.cost||0)) - (r.cons[x.id]*(x.cost||0)))
           .map(p => `<dt>${esc(p.name)} ${esc(p.vol||"")} · ${r.cons[p.id]} шт</dt><dd>${p.cost?eur(r.cons[p.id]*p.cost):"—"}</dd>`)
           .join("") || "<dt>ничего не выпито</dt><dd>—</dd>"}</dl></div>
@@ -548,7 +550,7 @@ async function addProduct(){
   try{
     await apply(API.addProduct(id, {name, vol:$("#npVol").value.trim(), cat, shape:$("#npShape").value,
       cost:num($("#npCost").value)||null, pack:parseInt($("#npPack").value)||null, color:$("#npColor").value,
-      order: cat==="sale"?50:cat==="free"?70:90, min: cat==="shared"?1:6}));
+      order: cat==="sale"?50:isFree(cat)?70:90, min: cat==="shared"?1:6}));
     toast("Добавлено в меню");
   }catch(e){ toast("Не сохранилось: "+e.message) }
 }

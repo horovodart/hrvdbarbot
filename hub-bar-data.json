@@ -133,7 +133,7 @@
   },
   "products": {
     "aro05": {
-      "cat": "free",
+      "cat": "water",
       "color": "#4FA3D9",
       "cost": 0.24,
       "dep": 0.15,
@@ -147,7 +147,7 @@
       "vol": "0,5 л · негаз."
     },
     "aro15": {
-      "cat": "free",
+      "cat": "water",
       "color": "#3B8BC4",
       "cost": 0.32,
       "dep": 0.15,
@@ -161,21 +161,21 @@
       "vol": "1,5 л · негаз."
     },
     "aro15gas": {
-      "cat": "free",
+      "cat": "shared",
       "color": "#7FB3D5",
       "cost": 0.32,
       "dep": 0.15,
       "min": 2,
       "name": "Вода Aro",
-      "note": "Цена принята как у негазированной 1,5 л.",
-      "order": 11.5,
+      "note": "Газированную не докупаем — это не питьевая вода для команды.",
+      "order": 29,
       "pack": 6,
-      "phaseout": false,
+      "phaseout": true,
       "shape": "water",
       "vol": "1,5 л · газ."
     },
     "chips_sk": {
-      "cat": "free",
+      "cat": "snack",
       "color": "#C0392B",
       "cost": null,
       "dep": 0.0,
@@ -202,7 +202,7 @@
       "vol": "0,7 л"
     },
     "chrumky": {
-      "cat": "free",
+      "cat": "snack",
       "color": "#F0C24B",
       "cost": null,
       "dep": 0.0,
@@ -501,7 +501,7 @@
       "vol": "0,33 л · банка · мандарин"
     },
     "popcorn": {
-      "cat": "free",
+      "cat": "snack",
       "color": "#E8A33D",
       "cost": null,
       "dep": 0.0,
@@ -514,13 +514,13 @@
       "vol": "пачка · соль, масло, сыр"
     },
     "pryaniki": {
-      "cat": "shared",
+      "cat": "snack",
       "color": "#A9714B",
       "cost": null,
       "dep": 0.0,
       "min": 1,
       "name": "Медовые пряники",
-      "order": 71,
+      "order": 17,
       "pack": null,
       "phaseout": true,
       "shape": "carton",
@@ -597,13 +597,13 @@
       "vol": "1,5 л · ПЭТ · 4%"
     },
     "syrove_koule": {
-      "cat": "shared",
+      "cat": "snack",
       "color": "#E8C04D",
       "cost": null,
       "dep": 0.0,
       "min": 1,
       "name": "Syrové koule",
-      "order": 70,
+      "order": 16,
       "pack": null,
       "phaseout": true,
       "shape": "carton",
@@ -842,29 +842,21 @@
     }
   },
   "returns": {
-    "r-2026-07-21": {
-      "amount": 17.6,
-      "by": "Миша",
-      "date": "2026-07-21T12:00:00.000Z",
-      "note": "Получено в августе, но за тару, накопленную до 22.07 — иначе задваивается с периодом. Проверить у Миши.",
-      "toTill": false,
-      "units": 117
-    },
     "r-2026-09-19": {
       "amount": 31.15,
       "by": "Миша",
       "date": "2026-09-19T12:00:00.000Z",
-      "note": "Сдачи с 26.07 по 21.09. Деньги легли в кассу — вычитаются из оплаченного.",
+      "note": "Сдачи с 26.07 по 21.09, включая забытый августовский платёж 17,60 €. Деньги легли в кассу.",
       "toTill": true,
       "units": 208
     },
     "r-start-2026-05-20": {
-      "amount": 22.0,
+      "amount": 39.6,
       "by": "Миша",
       "date": "2026-05-20T12:00:00.000Z",
-      "note": "Сдачи с 20.05 до 26.07, до начала периода. Одной записью.",
+      "note": "Сдачи с 20.05 по 26.07, до начала периода. Одной записью.",
       "toTill": false,
-      "units": 147
+      "units": 264
     }
   },
   "team": [
