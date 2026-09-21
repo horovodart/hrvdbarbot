@@ -35,7 +35,23 @@ $CLASP deploy --deploymentId "$DEPLOY_ID" --description "${MSG:-$(git log -1 --p
   || die "clasp deploy не прошёл."
 echo "Apps Script: выкачено на прежний адрес"
 
-# 5. Живой API должен ответить — деплой без проверки не считается сделанным.
+# 5. Адрес мини-приложения в боте — со свежей версией.
+# Telegram кэширует index.html намертво и версии на js/css его не трогают:
+# единственный способ заставить его перечитать страницу — сменить сам адрес.
+if [ -f .env.local ]; then
+  . ./.env.local
+  if [ -n "${BOT_TOKEN:-}" ]; then
+    MENU_URL="https://horovodart.github.io/hrvdbarbot/?v=$(git rev-parse --short HEAD)"
+    OUT="$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/setChatMenuButton" \
+      -H 'Content-Type: application/json' \
+      -d "{\"menu_button\":{\"type\":\"web_app\",\"text\":\"Бар\",\"web_app\":{\"url\":\"$MENU_URL\"}}}")"
+    echo "$OUT" | grep -q '"ok":true' && echo "Кнопка бота: $MENU_URL" || die "Не вышло обновить кнопку бота: $OUT"
+  fi
+else
+  echo "Кнопка бота не обновлена: нет .env.local с BOT_TOKEN"
+fi
+
+# 6. Живой API должен ответить — деплой без проверки не считается сделанным.
 sleep 3
 RESP="$(curl -s -L --max-time 30 "$API")"
 echo "$RESP" | grep -q '"alive":true' || die "API не отвечает как надо: ${RESP:0:200}"

@@ -690,6 +690,12 @@ if(location.search.includes("debug=1")) window.__hub = {S, model, get M(){ retur
 (async () => {
   try{ TG?.ready(); TG?.expand(); TG?.setHeaderColor?.("#FFFFFF"); TG?.setBackgroundColor?.("#FFFFFF"); TG?.disableVerticalSwipes?.() }catch(e){}
   try{
+    // Демо-режим уместен только локально. На боевом хосте пустой API означает одно:
+    // Telegram поднял страницу из кэша, где ещё не было адреса сервера. Молчать нельзя —
+    // иначе человек видит пустой склад и думает, что данные пропали.
+    const localHost = ["localhost","127.0.0.1","0.0.0.0",""].includes(location.hostname);
+    if(!API.live() && !localHost)
+      throw new Error("Приложение поднялось из кэша Telegram. Закрой его полностью и открой заново.");
     const d = await API.list();
     S.products = d.products; S.counts = d.counts; S.purchases = d.purchases; S.returns = d.returns || []; S.loaded = true;
     if(!API.live()) $("#sub").dataset.demo = "1";

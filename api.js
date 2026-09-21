@@ -6,6 +6,10 @@ window.API = (function(){
   const LS = "hub-bar-demo-v1";
   const live = () => !!C.API;
 
+  // Демо-состояние живёт в браузере и переживает деплой. Если приложение боевое —
+  // стираем его сразу: иначе старый локальный склад однажды всплывёт вместо настоящего.
+  if (live()) { try { localStorage.removeItem(LS) } catch(e){} }
+
   const readLocal = () => { try { return JSON.parse(localStorage.getItem(LS)) || null } catch(e){ return null } };
   const writeLocal = d => { try { localStorage.setItem(LS, JSON.stringify(d)) } catch(e){} };
 
