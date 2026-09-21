@@ -24,8 +24,22 @@ var BOOL_FIELDS = {hidden:1, initial:1, phaseout:1, toTill:1};
 
 /* ---------------- вход ---------------- */
 
-// GET — только проверка живости. Данные отдаются исключительно на POST с подписью Telegram.
-function doGet(e)  { return respond(function(){ return {alive:true, ts:new Date().toISOString()} }) }
+// GET — проверка живости. Данных не отдаёт: склад доступен только на POST с подписью
+// Telegram. Заодно прогоняет синхронизацию справочника, чтобы правки доезжали
+// сразу после деплоя, а не ждали, пока кто-нибудь откроет приложение.
+function doGet(e)  {
+  return respond(function(){
+    var synced = false;
+    try {
+      var lock = LockService.getScriptLock();
+      if (lock.tryLock(30000)) {
+        try { if (sheet('products').getLastRow() > 1) { syncProducts(); syncTeam(); synced = true } }
+        finally { lock.releaseLock() }
+      }
+    } catch (err) { /* синк не критичен для проверки живости */ }
+    return {alive:true, synced:synced, ts:new Date().toISOString()};
+  });
+}
 function doPost(e) {
   return respond(function(){
     var body = {};
@@ -262,6 +276,8 @@ function syncProducts(){
   ensureCols('returns');
   syncTeam();
   seedReturns();
+  syncSeeded('counts');        // опорные подсчёты правим вместе со справочником:
+  syncSeeded('purchases');     // без этого у новых товаров нет остатка и они прячутся
   props.setProperty('SEED_VERSION', String(SEED_VERSION));
 }
 
@@ -274,6 +290,23 @@ function seedReturns(){
   rows('returns').forEach(function(r){ have[r.id] = true });
   RETURNS_SEED.forEach(function(r){
     if (have[r.id]) patch('returns', r.id, r); else insert('returns', r);
+  });
+}
+
+/**
+ * Обновляет строки, которые заведены из кода: опорный подсчёт, чеки из истории.
+ * Ищет строго по id, поэтому подсчёты и закупки, созданные в приложении,
+ * не трогает — у них id с меткой времени.
+ */
+function syncSeeded(name){
+  var src = SEED[name] || {};
+  var have = {};
+  rows(name).forEach(function(r){ have[r.id] = true });
+  Object.keys(src).forEach(function(id){
+    var o = {}, k;
+    for (k in src[id]) o[k] = src[id][k];
+    o.id = id;
+    if (have[id]) patch(name, id, o); else insert(name, o);
   });
 }
 

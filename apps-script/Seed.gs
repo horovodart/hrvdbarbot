@@ -1,6 +1,6 @@
 /* Справочник товаров, команда и стартовые данные. */
 
-var SEED_VERSION = 9;
+var SEED_VERSION = 10;
 
 var TEAM_SEED = [
   {
