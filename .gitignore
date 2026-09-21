@@ -7,3 +7,4 @@ package-lock.json
 # clasp
 .clasprc.json
 __pycache__/
+tools/tests/

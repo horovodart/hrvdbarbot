@@ -201,8 +201,8 @@ function money(r){
       <dt class="tot">Недобор</dt><dd class="tot ${r.short>=0?"pos":"neg"}">${r.short>0?"+":""}${eur(r.short)}${pct!=null?" · оплачено "+pct+"%":""}</dd>
     </dl>
     <dl class="recon num" style="margin-top:12px">
-      <dt>Закупка выпитого</dt><dd>−${eur(r.costSale)}</dd>
-      <dt>Бесплатное · ${r.freeUnits} шт · отбивки нет</dt><dd>−${eur(r.costWater)}</dd>
+      <dt>Закупка выпитого</dt><dd>${r.costSale?"−":""}${eur(r.costSale)}</dd>
+      <dt>Бесплатное · ${r.freeUnits} шт · отбивки нет</dt><dd>${r.costWater?"−":""}${eur(r.costWater)}</dd>
       <dt class="tot">Итог периода</dt><dd class="tot ${r.net>=0?"pos":"neg"}">${r.net>0?"+":""}${eur(r.net)}</dd>
     </dl>
     <p class="note" style="margin:10px 0 0">Если бы платили все — ${r.ideal>0?"+":""}${eur(r.ideal)}. ${be!=null?`В ноль выходим при ${be}% оплаты.`:""}${r.depSpent?" Залога за тару ушло "+eur(r.depSpent)+" — вернётся при сдаче.":""}</p>
@@ -517,12 +517,14 @@ function moneySheet(r){
       <h3>Деньги за период</h3>
       <div class="meta">${ddmm(r.from.date)} – ${ddmm(r.to.date)} · ${Math.round(r.days)} дн.</div>
       <div style="margin-top:16px">${money(r)}</div>
+      ${S.M.all.since && !S.M.all.periods ? `<div class="blk"><h4>Амнистия ${ddmm(S.M.all.since)}</h4>
+        <p class="note" style="margin:0">Прошлый недобор списан. Счёт начнётся со следующего подсчёта: цель — платить за ${Math.round(C.GOAL_RATE*100)}% выпитого. Продержим ${C.GOAL_PERIODS} ${plural(C.GOAL_PERIODS,"период","периода","периодов")} подряд — и цена упадёт до ${eur(1)}.</p></div>` : ""}
       ${S.M.all.periods ? `<div class="blk"><h4>${S.M.all.since ? "С амнистии "+ddmm(S.M.all.since) : "За всё время"}</h4>
         <dl class="recon num">
           <dt>Выпито платных</dt><dd>${S.M.all.units} шт</dd>
           <dt>Должно было прийти</dt><dd>${eur(S.M.all.expected)}</dd>
           <dt>Пришло</dt><dd>${eur(S.M.all.got)}${S.M.all.payRate!=null?" · "+Math.round(S.M.all.payRate*100)+"%":""}</dd>
-          <dt>Потрачено на напитки</dt><dd>−${eur(S.M.all.cost)}</dd>
+          <dt>Потрачено на напитки</dt><dd>${S.M.all.cost?"−":""}${eur(S.M.all.cost)}</dd>
           <dt class="tot">Бар в сумме</dt><dd class="tot ${S.M.all.net>=0?"pos":"neg"}">${S.M.all.net>0?"+":""}${eur(S.M.all.net)}</dd>
         </dl>
         <div class="goal">
