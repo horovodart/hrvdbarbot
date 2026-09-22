@@ -480,5 +480,42 @@ console.log("\n— 9. сверка с tools/reference.py (hub-bar-data.json) —
   }
 }
 
+/* ------------------------------------------------------------------ */
+console.log("\n— 10. показываемый остаток не убывает сам —");
+{
+  // Правило Миши: приложение не занижает остаток между подсчётами. Число на
+  // карточке — факт (прошлый подсчёт плюс закупки), прогноз живёт отдельно.
+  const data = {
+    products: [{id:"p1", cat:"sale", cost:1, pack:1, min:6}],
+    counts: [
+      {id:"c1", date:"2026-01-01T00:00:00.000Z", stock:{p1:100}},
+      {id:"c2", date:"2026-02-01T00:00:00.000Z", stock:{p1:40}, cash:0}
+    ],
+    purchases: [{id:"b1", date:"2026-02-05T00:00:00.000Z", items:{p1:12}}]
+  };
+  const day1  = compute(data, {now:"2026-02-06T00:00:00.000Z"}).M.items.p1;
+  const day20 = compute(data, {now:"2026-02-25T00:00:00.000Z"}).M.items.p1;
+
+  eq("10.1 факт = прошлый подсчёт + закупки", day1.exact, 52);
+  eq("10.2 через 19 дней факт тот же", day20.exact, day1.exact);
+  ok("10.3 прогноз при этом убывает — он и должен",
+     day20.est < day1.est, `est: ${day1.est} → ${day20.est}`);
+  ok("10.4 прогноз не выдаётся за факт: est ≠ exact, когда время прошло",
+     day20.est !== day20.exact, "иначе прогноз молча подменит остаток");
+  ok("10.5 прогноз помечен флагом estimated", day20.estimated === true);
+
+  // и то, чем заполняется подсчёт, — тоже факт
+  const src = readFileSync(new URL("../../../app.js", import.meta.url), "utf8");
+  ok("10.6 поля подсчёта заполняются exact, а не est",
+     /S\.count\[p\.id\] = Math\.round\(M\.items\[p\.id\]\.exact\)/.test(src),
+     "догадка не должна превращаться в записанный подсчёт");
+  ok("10.7 крупное число на карточке берётся из exact",
+     /function stockLine\(it\)\{[\s\S]{0,400}?Math\.round\(it\.exact\)/.test(src),
+     "в stockLine остался est");
+  ok("10.8 «Закончилось» ставится по факту",
+     /Math\.round\(it\.exact\)<=0\?"Закончилось"/.test(src),
+     "флаг не должен опираться на прогноз");
+}
+
 console.log(`\nпрошло ${pass} из ${pass + fail}`);
 process.exit(fail ? 1 : 0);

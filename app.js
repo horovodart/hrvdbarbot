@@ -177,16 +177,18 @@ function model(){
 const sorted = () => [...S.products].filter(p => S.filter === "hidden" ? p.hidden : !p.hidden)
                                      .sort((a,b)=>(a.order??99)-(b.order??99));
 const flag = (it,p) => p.phaseout   ? `<span class="flag grey">Распродаём</span>`
-                     : it.st==="red"   ? `<span class="flag red">${Math.round(it.est)<=0?"Закончилось":"Докупить"}</span>`
+                     : it.st==="red"   ? `<span class="flag red">${Math.round(it.exact)<=0?"Закончилось":"Докупить"}</span>`
                      : it.st==="amber" ? `<span class="flag amber">Скоро</span>` : "";
 
 function stockLine(it){
-  const n = Math.round(it.est);
+  // Крупное число — то, что посчитал человек, плюс закупки. Само оно не убывает:
+  // средний расход — догадка, и выдавать догадку за остаток нельзя.
+  const n = Math.round(it.exact);
   if(n <= 0) return `<div class="stk red"><b class="num">0</b><span>нет</span></div>`;
   const t = it.daysLeft != null
-    ? (it.daysLeft > 60 ? "надолго" : it.daysLeft < 1 ? "меньше дня" : "на "+Math.floor(it.daysLeft)+" дн.")
+    ? (it.daysLeft > 60 ? "хватит надолго" : it.daysLeft < 1 ? "на исходе" : "хватит на "+Math.floor(it.daysLeft)+" дн.")
     : plural(n,"штука","штуки","штук");
-  return `<div class="stk ${it.st!=="green"?it.st:""}"><b class="num">${it.estimated?"≈":""}${n}</b><span>${t}</span></div>`;
+  return `<div class="stk ${it.st!=="green"?it.st:""}"><b class="num">${n}</b><span>${t}</span></div>`;
 }
 const tagFor = p => p.cat==="sale" ? `<span class="tag num">${eur(SALE)}</span>`
                   : isFree(p.cat) ? `<span class="tag free">бесплатно</span>`
@@ -217,7 +219,7 @@ function money(r){
 
 function renderMenu(M){
   const all = sorted();
-  const shown = all.filter(p => M.items[p.id].restock || Math.round(M.items[p.id].est) > 0);
+  const shown = all.filter(p => M.items[p.id].restock || Math.round(M.items[p.id].exact) > 0);
   const cnt = f => all.filter(p => M.items[p.id].st === f).length;
   $("#chips").innerHTML =
     `<button class="chip" data-f="all" aria-pressed="${S.filter==="all"}">Всё<span class="n num">${shown.length}</span></button>`+
@@ -234,7 +236,7 @@ function renderMenu(M){
   for(const cat of CATS){
     let ps = all.filter(p => p.cat===cat);
     if(S.filter !== "all") ps = ps.filter(p => M.items[p.id].st === S.filter);
-    ps = ps.filter(p => M.items[p.id].restock || Math.round(M.items[p.id].est) > 0);
+    ps = ps.filter(p => M.items[p.id].restock || Math.round(M.items[p.id].exact) > 0);
     if(!ps.length) continue;
     const fold = cat === "shared";                       // общие свёрнуты, пока не откроешь
     const open = !fold || S.open[cat];
@@ -244,7 +246,7 @@ function renderMenu(M){
     if(!open) continue;
     html += `<div class="grid">`;
     for(const p of ps){
-      const it = M.items[p.id], out = Math.round(it.est) <= 0;
+      const it = M.items[p.id], out = Math.round(it.exact) <= 0;
       html += `<button class="card ${out?"out":""}" data-p="${esc(p.id)}">
         <div class="thumb">${pic(p)}${flag(it,p)}${out && it.restock?`<span class="stamp"><span>Нет на складе</span></span>`:""}</div>
         <div class="cb"><div class="nm">${esc(p.name)}</div><div class="vol">${esc(p.vol||"")}</div>
@@ -267,7 +269,7 @@ function renderBuy(M){
   else {
     for(const p of needs){ const it = M.items[p.id];
       h += `<div class="row"><div class="mini">${pic(p)}</div><div class="info"><div class="nm">${esc(p.name)}</div>
-        <div class="sub2 num">${Math.round(it.est)} шт${p.pack?" · уп. "+p.pack:""}${p.cost?" · ~"+eur(it.need*(p.cost+(+p.dep||0))):""}</div></div>
+        <div class="sub2 num">${Math.round(it.exact)} шт${p.pack?" · уп. "+p.pack:""}${p.cost?" · ~"+eur(it.need*(p.cost+(+p.dep||0))):""}</div></div>
         <span class="pill ${it.st==="green"?"ink":it.st} num">+${it.need}</span></div>`;
     }
     const goods = needs.reduce((s,p)=> s + (p.cost ? M.items[p.id].need*p.cost : 0), 0);
@@ -306,9 +308,11 @@ function renderCount(M){
   // Выкидываем позицию из подсчёта только если её обнулил ЧЕЛОВЕК на прошлом подсчёте.
   // По расчётной оценке нельзя: виски на полке «допился» бы сам и исчез из приложения.
   const countable = p => M.items[p.id].restock || (M.items[p.id].base ?? 0) > 0 || M.items[p.id].bought > 0;
-  if(!S.count){ S.count = {}; for(const p of all) if(countable(p)) S.count[p.id] = Math.round(M.items[p.id].est) }
+  // Поля заполняем фактом: прошлый подсчёт плюс закупки. Расчётным расходом нельзя —
+  // иначе догадка приложения молча станет записанным подсчётом.
+  if(!S.count){ S.count = {}; for(const p of all) if(countable(p)) S.count[p.id] = Math.round(M.items[p.id].exact) }
   let h = `<h2 class="sec">Подсчёт раз в 2 недели<em>${M.last ? "прошлый "+ddmm(M.last.date)+" · "+Math.floor(M.dSince)+" дн. назад" : ""}</em></h2>
-    <p class="note" style="margin:0 0 12px">Посчитай холодильник и полки вместе. Поля заполнены расчётом — поправь на то, что видишь.</p><div class="panel">`;
+    <p class="note" style="margin:0 0 12px">Посчитай холодильник и полки вместе. Поля заполнены прошлым подсчётом плюс закупки — поправь на то, что видишь.</p><div class="panel">`;
   // кончившееся на сбыте не переспрашиваем: понадобится — заведут заново
   for(const cat of CATS) for(const p of all.filter(x => x.cat===cat && countable(x))){
     const it = M.items[p.id];
@@ -383,7 +387,7 @@ function sheet(p){
   const marg = p.cat==="sale" && p.cost != null ? SALE - p.cost : null;
   const buyLine = p.cost == null ? "цена закупки не заполнена"
     : `закупка ${eur(p.cost)} с НДС` + (dep ? ` · в магазине ${eur(p.cost+dep)} с залогом` : "") + (marg != null ? ` · маржа +${eur(marg)}` : "");
-  const n = Math.round(it.est);
+  const n = Math.round(it.exact);
   const kv = (l,v,cls) => `<div><small>${l}</small><b class="${cls||""}">${v}</b></div>`;
 
   const measured = it.periods.filter(x => x.measured);
@@ -413,8 +417,9 @@ function sheet(p){
         <span class="buy num">${buyLine}</span>
       </div>
       <div class="kv num">
-        ${kv("Остаток", (it.estimated?"≈ ":"")+n+" шт", it.st!=="green"?it.st:"")}
-        ${kv("Хватит на", it.daysLeft!=null ? (it.daysLeft>60?"больше 60 дн.":it.daysLeft<1?"меньше дня":Math.floor(it.daysLeft)+" "+plural(Math.floor(it.daysLeft),"день","дня","дней")) : "нет данных", it.daysLeft==null?"dim":(it.st!=="green"?it.st:""))}
+        ${kv("Остаток"+(S.M.last?" на "+ddmm(S.M.last.date):""), n+" шт", it.st!=="green"?it.st:"")}
+        ${it.estimated ? kv("Сейчас, по расчёту", "≈ "+Math.round(it.est)+" шт · прогноз", "dim") : ""}
+        ${kv("Хватит на", it.daysLeft!=null ? (it.daysLeft>60?"больше 60 дн.":it.daysLeft<1?"меньше дня":Math.floor(it.daysLeft)+" "+plural(Math.floor(it.daysLeft),"день","дня","дней"))+" · прогноз" : "нет данных", it.daysLeft==null?"dim":(it.st!=="green"?it.st:""))}
         ${kv("Средний расход", it.rate != null ? dec(it.rate*7)+" в нед." : "нет данных", it.rate!=null?"":"dim")}
         ${kv("Купить на "+TARGET+" дн.", it.need ? "+"+it.need+" шт" : "не нужно", it.need?"":"dim")}
       </div>
@@ -623,7 +628,7 @@ addEventListener("scroll", () => $("#top").classList.toggle("stuck", scrollY > 6
 function setVal(k,id,v){
   if(k === "b"){ S.buy[id] = v; dock() } else { S.count[id] = v; previewCount(S.M) }
   const el = document.getElementById(k+"-"+id);
-  if(el) el.classList.toggle("changed", k === "b" ? v > 0 : v !== Math.round(S.M.items[id].est));
+  if(el) el.classList.toggle("changed", k === "b" ? v > 0 : v !== Math.round(S.M.items[id].exact));
 }
 async function saveBuy(){
   const items = {}; for(const [k,v] of Object.entries(S.buy)) if(v > 0) items[k] = v;
