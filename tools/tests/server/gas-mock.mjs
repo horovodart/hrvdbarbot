@@ -259,53 +259,37 @@ export function makeEnv(opts = {}) {
   };
   const CacheService = { getScriptCache: () => cacheObj, getUserCache: () => cacheObj, getDocumentCache: () => cacheObj };
 
-  /* Диск: скрипт ходит в Drive API через UrlFetchApp, поэтому мок — это ответы API */
-  const drive = { folders: new Map(), files: new Map(), seq: 0 };
+  /* Telegram вместо Диска: мок отвечает как api.telegram.org */
+  const drive = { files: new Map(), seq: 0, sent: [] };
   const ScriptApp = { getOAuthToken: () => 'тестовый-токен' };
 
   const UrlFetchApp = {
     fetch(url, opts = {}) {
-      const body = (code, text) => ({
-        getResponseCode: () => code,
-        getContentText: () => text,
-        getBlob: () => Utilities.newBlob(text)
+      const body = (code, text, blob) => ({
+        getResponseCode: () => code, getContentText: () => text,
+        getBlob: () => blob || Utilities.newBlob(text)
       });
-      const auth = opts.headers && opts.headers.Authorization;
-      if (!auth) return body(401, '{"error":"нет токена"}');
-
-      // создать папку
-      if (opts.method === 'post' && url.indexOf('/upload/') < 0) {
-        const id = 'folder-' + (++drive.seq);
-        drive.folders.set(id, JSON.parse(opts.payload));
-        return body(200, JSON.stringify({ id }));
+      if (url.indexOf('/sendPhoto') >= 0) {
+        const p = opts.payload || {};
+        if (!p.photo) return body(200, JSON.stringify({ ok: false, description: 'нет фото' }));
+        const id = 'tgfile-' + (++drive.seq);
+        drive.files.set(id, { id, blob: p.photo, caption: p.caption, chat: p.chat_id });
+        drive.sent.push({ chat: p.chat_id, caption: p.caption });
+        return body(200, JSON.stringify({ ok: true,
+          result: { photo: [{ file_id: id + '-мелкий' }, { file_id: id }] } }));
       }
-      // загрузить файл
-      if (opts.method === 'post') {
-        const raw = opts.payload;                       // байты multipart
-        const id = 'file-' + (++drive.seq);
-        const text = Buffer.from(Uint8Array.from(raw.map(x => x & 0xff))).toString('binary');
-        const meta = JSON.parse(text.slice(text.indexOf('{'), text.indexOf('}') + 1));
-        const head = text.indexOf('\r\n\r\n', text.indexOf('--hubbar', 40));
-        const mime = /Content-Type: ([^\r]+)/g;
-        const mimes = text.match(/Content-Type: ([^\r]+)/g).map(x => x.split(': ')[1]);
-        const start = head + 4, stop = text.lastIndexOf('\r\n--hubbar--');
-        const bytes = raw.slice(start, stop).map(x => x & 0xff);
-        drive.files.set(id, { id, name: meta.name, mime: mimes[mimes.length - 1], bytes, parents: meta.parents });
-        return body(200, JSON.stringify({ id }));
+      if (url.indexOf('/getFile') >= 0) {
+        const id = JSON.parse(opts.payload).file_id;
+        if (!drive.files.has(id)) return body(200, JSON.stringify({ ok: false, description: 'файл не найден' }));
+        return body(200, JSON.stringify({ ok: true, result: { file_path: 'photos/' + id + '.jpg' } }));
       }
-      // прочитать
-      const m = url.match(/files\/([^?]+)/);
-      const id = m && decodeURIComponent(m[1]);
-      if (drive.folders.has(id)) return body(200, JSON.stringify({ id, trashed: false }));
-      const f = drive.files.get(id);
-      if (!f) return body(404, '{"error":"нет такого файла"}');
-      if (url.indexOf('alt=media') >= 0) {
-        const blob = Utilities.newBlob('');
-        blob.__bytes = f.bytes;
-        blob.getBytes = () => f.bytes.map(x => (x > 127 ? x - 256 : x));
-        return { getResponseCode: () => 200, getContentText: () => '', getBlob: () => blob };
+      if (url.indexOf('/file/bot') >= 0) {
+        const id = url.split('/photos/')[1].replace('.jpg', '');
+        const f = drive.files.get(id);
+        if (!f) return body(404, 'нет файла');
+        return body(200, '', f.blob);
       }
-      return body(200, JSON.stringify({ mimeType: f.mime, name: f.name }));
+      return body(404, JSON.stringify({ ok: false, description: 'мок такого не умеет: ' + url }));
     }
   };
 

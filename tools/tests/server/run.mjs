@@ -733,7 +733,7 @@ G('9. handle()');
 
 function readyApp(props) {
   const sheets = bootedBook();
-  return newApp({ sheets, props: Object.assign({ SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN }, props || {}) });
+  return newApp({ sheets, props: Object.assign({ SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN, ADMIN_IDS: String(USER.id) }, props || {}) });
 }
 
 test('list не берёт замок, когда синкать нечего', () => {
@@ -814,28 +814,39 @@ G('11. чек закупки');
 
 const PNG1 = 'data:image/jpeg;base64,' + Buffer.from('фото чека, как будто').toString('base64');
 
-test('закупка с фото: файл лёг на Диск, в строке — только его id', () => {
+test('закупка с фото: фото ушло в Telegram, в строке — только file_id', () => {
   const { env, api } = readyApp();
   const out = api.handle('addPurchase', { date:'2026-10-01T10:00:00.000Z', total: 50,
     items:{aro05:6}, photo: PNG1 }, { id:'1', name:'Миша' });
   const buy = Object.values(out.purchases).find(x => x.total === 50);
   assert.ok(buy, 'закупка записалась');
-  assert.ok(buy.receipt, 'id файла записан в строку');
+  assert.ok(buy.receipt, 'file_id записан в строку');
   assert.ok(!/base64/.test(String(buy.receipt)), 'в таблицу не должно попасть само фото');
-  assert.equal(env.drive.files.size, 1, 'на Диске ровно один файл');
+  assert.equal(env.drive.sent.length, 1, 'отправлено ровно одно фото');
 });
 
-test('папка чеков заводится один раз и запоминается', () => {
-  // Поиск по имени потребовал бы доступа ко всему Диску — скрипт должен видеть
-  // только то, что создал сам, поэтому папка ищется по запомненному id.
-  const { env, api } = readyApp();
-  api.handle('addPurchase', { total: 70, items:{aro05:1}, photo: PNG1 }, { id:'1', name:'Миша' });
-  const id = env.props.RECEIPTS_ID;
-  assert.ok(id, 'идентификатор папки записан в свойства скрипта');
-  api.handle('addPurchase', { total: 71, items:{aro05:1}, photo: PNG1 }, { id:'1', name:'Миша' });
-  assert.equal(env.props.RECEIPTS_ID, id, 'вторая закупка легла в ту же папку');
-  assert.equal(env.drive.folders.size, 1, 'папка одна, а не по штуке на чек');
-  assert.equal(env.drive.files.size, 2, 'а файлов два');
+test('берётся самый крупный из размеров, что вернул Telegram', () => {
+  const { api } = readyApp();
+  const out = api.handle('addPurchase', { total: 60, items:{aro05:1}, photo: PNG1 }, { id:'1', name:'Миша' });
+  const buy = Object.values(out.purchases).find(x => x.total === 60);
+  assert.ok(!/мелкий/.test(String(buy.receipt)), 'сохранили мелкий превью вместо оригинала: ' + buy.receipt);
+});
+
+test('чеки уходят в заданный чат, а по умолчанию — первому админу', () => {
+  const a = readyApp();
+  a.api.handle('addPurchase', { total: 70, items:{aro05:1}, photo: PNG1 }, { id:'1', name:'Миша' });
+  assert.equal(a.env.drive.sent[0].chat, String(USER.id), 'по умолчанию — первый из ADMIN_IDS');
+
+  const b = newApp({ sheets: bootedBook(),
+    props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN, ADMIN_IDS: String(USER.id), RECEIPTS_CHAT: '-100500' } });
+  b.api.handle('addPurchase', { total: 71, items:{aro05:1}, photo: PNG1 }, { id:'1', name:'Миша' });
+  assert.equal(b.env.drive.sent[0].chat, '-100500', 'RECEIPTS_CHAT перебивает умолчание');
+});
+
+test('без токена бота и без адреса чата — понятная ошибка', () => {
+  const noChat = newApp({ sheets: bootedBook(), props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
+  throws(() => noChat.api.handle('addPurchase', { total: 1, items:{aro05:1}, photo: PNG1 },
+    { id:'1', name:'Миша' }), /Некуда сохранить/i, 'нет ни чата, ни админов');
 });
 
 test('чек отдаётся обратно тем же, чем положили', () => {
@@ -846,6 +857,8 @@ test('чек отдаётся обратно тем же, чем положил�
   const got = api.handle('getReceipt', { id }, { id:'1', name:'Миша' });
   assert.equal(got.mime, 'image/jpeg', 'тип картинки сохранён');
   assert.equal('data:' + got.mime + ';base64,' + got.data, PNG1, 'байты вернулись те же');
+  assert.ok(!/base64/.test(JSON.stringify(api.handle('list', {}, { id:'1', name:'Миша' }).purchases)),
+    'в общий список фото не попадает — оно тяжёлое');
 });
 
 test('закупка без фото работает как раньше', () => {

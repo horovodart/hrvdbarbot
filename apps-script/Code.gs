@@ -213,44 +213,40 @@ function listCached(fresh){
 
 function dropListCache(){ try { CacheService.getScriptCache().remove(LIST_KEY) } catch (e) {} }
 
-/* Фото чека кладём на Диск, в строку закупки пишем только идентификатор файла.
-   Ссылку наружу не открываем: чек отдаётся по запросу тому, кто уже прошёл
-   проверку команды, — как и всё остальное в приложении.
+/* Фото чека храним в Telegram, а не на Диске.
 
-   Работаем напрямую с Drive API, а не через DriveApp: DriveApp даже для
-   создания папки требует доступа ко ВСЕМУ Диску владельца. Через API хватает
-   drive.file — скрипт видит только то, что создал сам, и ничего больше. */
-var RECEIPTS_DIR = 'HOROVOD HUB · чеки';
-var DRIVE = 'https://www.googleapis.com/drive/v3/files';
-var DRIVE_UP = 'https://www.googleapis.com/upload/drive/v3/files';
+   Диск через Apps Script требует доступа ко ВСЕМУ Диску владельца: узкого права
+   «только свои файлы» скрипту не выдают, потому что разрешения он получает по тем
+   службам, которые видит в коде, а мы ходили по сети. Ради двух чеков в месяц
+   открывать всю почту-документы-фотографии — плохая сделка.
 
-function driveCall(url, opts){
-  opts = opts || {};
-  opts.muteHttpExceptions = true;
-  opts.headers = opts.headers || {};
-  opts.headers.Authorization = 'Bearer ' + ScriptApp.getOAuthToken();
-  var r = UrlFetchApp.fetch(url, opts);
-  var code = r.getResponseCode();
-  if (code < 200 || code >= 300) throw new Error('Диск ответил ' + code + ': ' + r.getContentText().slice(0, 200));
-  return r;
+   Telegram хранит фотографии сам, бесплатно и бессрочно. Токен бота у нас уже есть,
+   право ходить в сеть — тоже. В строку закупки пишем file_id, само фото приложение
+   тянет по запросу. Куда складывать — свойство RECEIPTS_CHAT, по умолчанию первый
+   админ из ADMIN_IDS: у него в переписке с ботом заодно копится архив чеков. */
+
+function receiptsChat(){
+  var c = prop('RECEIPTS_CHAT');
+  if (c) return String(c).trim();
+  var admins = String(prop('ADMIN_IDS') || '').split(',').map(function(x){ return x.trim() }).filter(String);
+  if (!admins.length) throw new Error('Некуда сохранить чек: задай RECEIPTS_CHAT или ADMIN_IDS');
+  return admins[0];
 }
 
-function receiptsFolder(){
-  var props = PropertiesService.getScriptProperties();
-  var id = props.getProperty('RECEIPTS_ID');
-  if (id) {
-    try { driveCall(DRIVE + '/' + id + '?fields=id,trashed'); return id } catch (e) { /* папку унесли — заведём новую */ }
-  }
-  var res = JSON.parse(driveCall(DRIVE + '?fields=id', {
-    method: 'post', contentType: 'application/json',
-    payload: JSON.stringify({name: RECEIPTS_DIR, mimeType: 'application/vnd.google-apps.folder'})
-  }).getContentText());
-  props.setProperty('RECEIPTS_ID', res.id);
-  return res.id;
+function tg(method, payload, isMultipart){
+  var token = prop('BOT_TOKEN');
+  if (!token) throw new Error('Нет токена бота');
+  var opts = {muteHttpExceptions: true};
+  if (isMultipart) { opts.method = 'post'; opts.payload = payload }
+  else { opts.method = 'post'; opts.contentType = 'application/json'; opts.payload = JSON.stringify(payload) }
+  var r = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/' + method, opts);
+  var j = JSON.parse(r.getContentText());
+  if (!j.ok) throw new Error('Telegram: ' + (j.description || r.getResponseCode()));
+  return j.result;
 }
 
 // photo — строка вида data:image/jpeg;base64,…
-function saveReceipt(photo, name){
+function saveReceipt(photo, caption){
   if (!photo) return '';
   var m = String(photo).match(/^data:([\w\/+.-]+);base64,(.+)$/);
   if (!m) throw new Error('Фото чека в непонятном виде');
@@ -259,23 +255,27 @@ function saveReceipt(photo, name){
   var bytes = Utilities.base64Decode(m[2]);
   if (bytes.length > 8 * 1024 * 1024) throw new Error('Фото чека слишком большое');
 
-  var meta = {name: name || ('чек-' + new Date().toISOString().slice(0,10)), parents: [receiptsFolder()]};
-  var res = JSON.parse(driveCall(DRIVE_UP + '?uploadType=multipart&fields=id', {
-    method: 'post',
-    contentType: 'multipart/related; boundary=hubbar',
-    payload: Utilities.newBlob(
-      '--hubbar\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' +
-      JSON.stringify(meta) + '\r\n--hubbar\r\nContent-Type: ' + mime + '\r\n\r\n'
-    ).getBytes().concat(bytes).concat(Utilities.newBlob('\r\n--hubbar--').getBytes())
-  }).getContentText());
-  return res.id;
+  var ext = mime.split('/')[1].replace('jpeg', 'jpg');
+  var res = tg('sendPhoto', {
+    chat_id: receiptsChat(),
+    caption: String(caption || '').slice(0, 900),
+    photo: Utilities.newBlob(bytes, mime, 'чек.' + ext)
+  }, true);
+  // берём самый крупный из присланных размеров
+  var sizes = res.photo || [];
+  if (!sizes.length) throw new Error('Telegram не вернул фото');
+  return sizes[sizes.length - 1].file_id;
 }
 
 function readReceipt(id){
   if (!id) throw new Error('У этой закупки нет фото чека');
-  var meta = JSON.parse(driveCall(DRIVE + '/' + id + '?fields=mimeType,name').getContentText());
-  var blob = driveCall(DRIVE + '/' + id + '?alt=media').getBlob();
-  return {mime: meta.mimeType, data: Utilities.base64Encode(blob.getBytes()), name: meta.name};
+  var f = tg('getFile', {file_id: String(id)});
+  var url = 'https://api.telegram.org/file/bot' + prop('BOT_TOKEN') + '/' + f.file_path;
+  var r = UrlFetchApp.fetch(url, {muteHttpExceptions: true});
+  if (r.getResponseCode() !== 200) throw new Error('Не вышло забрать фото чека');
+  var blob = r.getBlob();
+  return {mime: blob.getContentType() || 'image/jpeg', data: Utilities.base64Encode(blob.getBytes()),
+          name: String(f.file_path || 'чек').split('/').pop()};
 }
 
 function listAll(){
