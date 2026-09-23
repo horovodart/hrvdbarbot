@@ -139,6 +139,7 @@ function handle(action, p, user){
   try {
     var who = user ? user.name : null;
     if (action === 'addPurchase'){
+      ensureCols('purchases');                 // без этого receipt и prices молча пропадают
       var pid = uid('p');
       var receipt = p.photo ? saveReceipt(p.photo, 'чек ' + (p.date || '').slice(0,10) + ' ' + pid) : '';
       // Цены с чека — главный смысл загрузки: по ним обновляется цена закупки,

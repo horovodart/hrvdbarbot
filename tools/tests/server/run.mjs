@@ -825,6 +825,21 @@ test('закупка с фото: фото ушло в Telegram, в строке
   assert.equal(env.drive.sent.length, 1, 'отправлено ровно одно фото');
 });
 
+test('лист без новых колонок: они досоздаются, а не теряются молча', () => {
+  // Старый лист закупок не знает про receipt и prices. insert пишет по шапке,
+  // поэтому без ensureCols значения просто исчезали — молча, без ошибки.
+  const sheets = bootedBook();
+  const head = sheets.purchases[0];
+  sheets.purchases = sheets.purchases.map(r => r.slice(0, head.indexOf('receipt') >= 0 ? head.indexOf('receipt') : r.length));
+  const { env, api } = newApp({ sheets, props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN, ADMIN_IDS: String(USER.id) } });
+  const out = api.handle('addPurchase', { total: 80, items:{aro05:1}, photo: PNG1,
+    prices:{ aro05: 9.99 } }, { id:'1', name:'Миша' });
+  const buy = Object.values(out.purchases).find(x => x.total === 80);
+  assert.ok(buy.receipt, 'file_id сохранился, а не пропал');
+  assert.equal(buy.prices.list.aro05, 9.99, 'цены тоже на месте');
+  assert.ok(env.dump('purchases')[0].indexOf('receipt') >= 0, 'колонка появилась в шапке');
+});
+
 test('берётся самый крупный из размеров, что вернул Telegram', () => {
   const { api } = readyApp();
   const out = api.handle('addPurchase', { total: 60, items:{aro05:1}, photo: PNG1 }, { id:'1', name:'Миша' });
