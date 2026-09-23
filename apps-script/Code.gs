@@ -278,8 +278,13 @@ function readReceipt(id){
   var r = UrlFetchApp.fetch(url, {muteHttpExceptions: true});
   if (r.getResponseCode() !== 200) throw new Error('Не вышло забрать фото чека');
   var blob = r.getBlob();
-  return {mime: blob.getContentType() || 'image/jpeg', data: Utilities.base64Encode(blob.getBytes()),
-          name: String(f.file_path || 'чек').split('/').pop()};
+  // Telegram отдаёт файл без типа — браузеру этого мало, определяем по расширению
+  var name = String(f.file_path || 'чек').split('/').pop();
+  var ext = (name.split('.').pop() || '').toLowerCase();
+  var byExt = {jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', webp:'image/webp', heic:'image/heic'};
+  var mime = byExt[ext] || blob.getContentType();
+  if (!mime || mime.indexOf('image/') !== 0) mime = 'image/jpeg';
+  return {mime: mime, data: Utilities.base64Encode(blob.getBytes()), name: name};
 }
 
 function listAll(){

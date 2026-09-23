@@ -880,7 +880,9 @@ test('чек отдаётся обратно тем же, чем положил�
   const id = Object.values(out.purchases).find(x => x.total === 51).id
           || Object.entries(out.purchases).find(([,x]) => x.total === 51)[0];
   const got = api.handle('getReceipt', { id }, { id:'1', name:'Миша' });
-  assert.equal(got.mime, 'image/jpeg', 'тип картинки сохранён');
+  // Telegram отдаёт файл без типа: браузер по такому картинку не покажет
+  assert.ok(/^image\//.test(got.mime), 'тип должен быть картинкой, а не ' + got.mime);
+  assert.equal(got.mime, 'image/jpeg', 'по расширению .jpg');
   assert.equal('data:' + got.mime + ';base64,' + got.data, PNG1, 'байты вернулись те же');
   assert.ok(!/base64/.test(JSON.stringify(api.handle('list', {}, { id:'1', name:'Миша' }).purchases)),
     'в общий список фото не попадает — оно тяжёлое');
