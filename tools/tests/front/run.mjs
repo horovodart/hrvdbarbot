@@ -340,7 +340,8 @@ console.log("\n— 7. items: restock / st / need —");
     P("pD21",     "sale",  31, 21),
     P("pMin10",   "sale",  10, 10, {min:10, pack:undefined}),
     P("pMin8",    "sale",  10, 10, {min:8,  pack:undefined}),
-    P("pMin5",    "sale",  10, 10, {min:5,  pack:undefined})
+    P("pMin5",    "sale",  10, 10, {min:5,  pack:undefined}),
+    P("pMin12",   "sale",  10, 10, {min:12, pack:undefined})   // строго ниже минимума
   ];
   const stock = (k) => Object.fromEntries(defs.map(d => [d.id, d[k]]));
   const d = {
@@ -366,7 +367,9 @@ console.log("\n— 7. items: restock / st / need —");
   eq("7.11 daysLeft ровно 14 → amber (граница не строгая)", it.pD14.st, "amber");
   eq("7.12 daysLeft ровно 21 → green (граница не строгая)", it.pD21.st, "green");
 
-  eq("7.13 rate=null, est<=min → red", [it.pMin10.rate, it.pMin10.st], [null, "red"]);
+  // «держаться на 12 штуках» — значит 12 это нормально, а 11 уже нет
+  eq("7.13 ровно на минимуме — жёлтый, а не красный", [it.pMin10.rate, it.pMin10.st], [null, "amber"]);
+  eq("7.13a строго ниже минимума — красный", it.pMin12.st, "red");
   eq("7.14 rate=null, est<=min*1.5 → amber", it.pMin8.st, "amber");
   eq("7.15 rate=null, est>min*1.5 → green", it.pMin5.st, "green");
 
