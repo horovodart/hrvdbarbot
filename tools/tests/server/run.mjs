@@ -825,6 +825,19 @@ test('закупка с фото: файл лёг на Диск, в строке
   assert.equal(env.drive.files.size, 1, 'на Диске ровно один файл');
 });
 
+test('папка чеков заводится один раз и запоминается', () => {
+  // Поиск по имени потребовал бы доступа ко всему Диску — скрипт должен видеть
+  // только то, что создал сам, поэтому папка ищется по запомненному id.
+  const { env, api } = readyApp();
+  api.handle('addPurchase', { total: 70, items:{aro05:1}, photo: PNG1 }, { id:'1', name:'Миша' });
+  const id = env.props.RECEIPTS_ID;
+  assert.ok(id, 'идентификатор папки записан в свойства скрипта');
+  api.handle('addPurchase', { total: 71, items:{aro05:1}, photo: PNG1 }, { id:'1', name:'Миша' });
+  assert.equal(env.props.RECEIPTS_ID, id, 'вторая закупка легла в ту же папку');
+  assert.equal(env.drive.folders.size, 1, 'папка одна, а не по штуке на чек');
+  assert.equal(env.drive.files.size, 2, 'а файлов два');
+});
+
 test('чек отдаётся обратно тем же, чем положили', () => {
   const { api } = readyApp();
   const out = api.handle('addPurchase', { total: 51, items:{aro05:1}, photo: PNG1 }, { id:'1', name:'Миша' });

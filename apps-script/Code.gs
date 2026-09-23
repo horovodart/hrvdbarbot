@@ -218,9 +218,15 @@ function dropListCache(){ try { CacheService.getScriptCache().remove(LIST_KEY) }
    проверку команды, — как и всё остальное в приложении. */
 var RECEIPTS_DIR = 'HOROVOD HUB · чеки';
 
+// Ищем папку не по имени, а по запомненному идентификатору: поиск по имени
+// потребовал бы доступа ко всему Диску, а так скрипт видит только то, что создал сам.
 function receiptsFolder(){
-  var it = DriveApp.getFoldersByName(RECEIPTS_DIR);
-  return it.hasNext() ? it.next() : DriveApp.createFolder(RECEIPTS_DIR);
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('RECEIPTS_ID');
+  if (id) { try { return DriveApp.getFolderById(id) } catch (e) { /* папку унесли — заведём новую */ } }
+  var f = DriveApp.createFolder(RECEIPTS_DIR);
+  props.setProperty('RECEIPTS_ID', f.getId());
+  return f;
 }
 
 // photo — строка вида data:image/jpeg;base64,…

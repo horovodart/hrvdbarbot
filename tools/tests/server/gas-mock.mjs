@@ -269,18 +269,19 @@ export function makeEnv(opts = {}) {
     return f;
   };
   const mkFolder = (name) => {
-    const fold = { name, getName: () => name,
+    const id = 'folder-' + (++drive.seq);
+    const fold = { id, name, getId: () => id, getName: () => name,
       createFile: (blob) => mkFile(blob, blob.getName ? blob.getName() : name) };
-    drive.folders.set(name, fold);
+    drive.folders.set(id, fold);
     return fold;
   };
   const DriveApp = {
-    getFoldersByName(n) {
-      const has = drive.folders.has(n);
-      let used = false;
-      return { hasNext: () => has && !used, next: () => { used = true; return drive.folders.get(n) } };
-    },
     createFolder: (n) => mkFolder(n),
+    getFolderById(id) {
+      const f = drive.folders.get(String(id));
+      if (!f) throw new Error('Папка не найдена: ' + id);
+      return f;
+    },
     getFileById(id) {
       const f = drive.files.get(String(id));
       if (!f) throw new Error('Файл не найден: ' + id);
