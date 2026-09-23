@@ -367,11 +367,12 @@ console.log("\n— 7. items: restock / st / need —");
   eq("7.11 daysLeft ровно 14 → amber (граница не строгая)", it.pD14.st, "amber");
   eq("7.12 daysLeft ровно 21 → green (граница не строгая)", it.pD21.st, "green");
 
-  // «держаться на 12 штуках» — значит 12 это нормально, а 11 уже нет
-  eq("7.13 ровно на минимуме — жёлтый, а не красный", [it.pMin10.rate, it.pMin10.st], [null, "amber"]);
+  // «держаться на 12 штуках» — значит 12 нормально, 11 уже нет. Размытого пояса
+  // «до полутора минимумов» больше нет: он держал в закупке то, чего хватает.
+  eq("7.13 ровно на минимуме — спокойно", [it.pMin10.rate, it.pMin10.st], [null, "green"]);
   eq("7.13a строго ниже минимума — красный", it.pMin12.st, "red");
-  eq("7.14 rate=null, est<=min*1.5 → amber", it.pMin8.st, "amber");
-  eq("7.15 rate=null, est>min*1.5 → green", it.pMin5.st, "green");
+  eq("7.14 выше минимума — спокойно", it.pMin8.st, "green");
+  eq("7.15 сильно выше минимума — спокойно", it.pMin5.st, "green");
 
   eq("7.16 need округляется вверх до pack (11 → 12 при pack 6)", it.pAmber.need, 12);
   eq("7.17 need кратен pack (18 при pack 6)", it.pRed.need, 18);
@@ -380,8 +381,9 @@ console.log("\n— 7. items: restock / st / need —");
   eq("7.18 зелёному закупка не предлагается", it.pGreen.need, 0);
   eq("7.19 need для est=0: 28 → 30 при pack 6", it.pZero.need, 30);
   eq("7.20 без pack need округляется вверх до целого", it.pNoPack.need, 18);
-  eq("7.21 rate=null + не green: need = min*2 − est", it.pMin10.need, 10);
-  eq("7.22 rate=null + amber: need = min*2 − est", it.pMin8.need, 6);
+  eq("7.21 на минимуме закупка не нужна", it.pMin10.need, 0);
+  eq("7.21a ниже минимума — добираем до двух минимумов", it.pMin12.need, 14);   // 24 − 10
+  eq("7.22 выше минимума закупка не нужна", it.pMin8.need, 0);
   eq("7.23 rate=null + green: need = 0", it.pMin5.need, 0);
   eq("7.24 rate считается верно (1 шт/день)", it.pRed.rate, 1);
   eq("7.25 estimated=false при dSince=0", it.pRed.estimated, false);
@@ -525,8 +527,8 @@ console.log("\n— 11. минимум — жёсткий пол —");
   ok("11.3 и закупка предлагается", low.need > 0, `need = ${low.need}`);
   eq("11.4 добираем до двух минимумов, кратно упаковке", low.need, 18);   // 24 − 6 = 18
 
-  const mid = compute(water(12, 17), {now:"2026-02-01T00:00:00.000Z"}).M.items.w;
-  eq("11.5 между min и min×1.5 — жёлтый", mid.st, "amber");
+  const mid = compute(water(12, 12), {now:"2026-02-01T00:00:00.000Z"}).M.items.w;
+  eq("11.5 ровно на минимуме — спокойно, закупку не навязываем", [mid.st, mid.need], ["green", 0]);
 
   const hi = compute(water(4, 19), {now:"2026-02-01T00:00:00.000Z"}).M.items.w;
   eq("11.6 выше min×1.5 — зелёный", hi.st, "green");

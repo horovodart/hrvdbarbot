@@ -96,9 +96,8 @@ def compute(d, now=None):
         if restock:
             st = "green"
             if jsround(exact) <= 0: st = "red"                    # минимум — жёсткий пол
-            elif mn is not None and exact < mn: st = "red"      # ровно на минимуме — ещё не тревога
+            elif mn is not None and exact < mn: st = "red"      # минимум значит одно: ниже нельзя
             elif left is not None and left < HORIZON: st = "red"
-            elif mn is not None and exact <= mn * 1.5: st = "amber"
             elif left is not None and left < AMBER: st = "amber"
         need = 0
         # без повода не предлагаем: нехватка в треть штуки округлялась до упаковки

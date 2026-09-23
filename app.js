@@ -119,9 +119,8 @@ function model(){
       st = "green";
       // минимум — жёсткий пол: ниже него тревожим, даже если по расходу «хватит надолго»
       if(Math.round(exact) <= 0) st = "red";
-      else if(p.min != null && exact < p.min) st = "red";      // ровно на минимуме — ещё не тревога
+      else if(p.min != null && exact < p.min) st = "red";      // минимум значит одно: ниже нельзя
       else if(daysLeft != null && daysLeft < HORIZON) st = "red";
-      else if(p.min != null && exact <= p.min*1.5) st = "amber";
       else if(daysLeft != null && daysLeft < AMBER) st = "amber";
     }
 
