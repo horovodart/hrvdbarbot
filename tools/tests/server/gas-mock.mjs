@@ -259,33 +259,53 @@ export function makeEnv(opts = {}) {
   };
   const CacheService = { getScriptCache: () => cacheObj, getUserCache: () => cacheObj, getDocumentCache: () => cacheObj };
 
-  /* DriveApp: папки и файлы в памяти */
+  /* Диск: скрипт ходит в Drive API через UrlFetchApp, поэтому мок — это ответы API */
   const drive = { folders: new Map(), files: new Map(), seq: 0 };
-  const mkFile = (blob, name) => {
-    const id = 'file-' + (++drive.seq);
-    const f = { id, name, blob,
-      getId: () => id, getName: () => name, getBlob: () => blob };
-    drive.files.set(id, f);
-    return f;
-  };
-  const mkFolder = (name) => {
-    const id = 'folder-' + (++drive.seq);
-    const fold = { id, name, getId: () => id, getName: () => name,
-      createFile: (blob) => mkFile(blob, blob.getName ? blob.getName() : name) };
-    drive.folders.set(id, fold);
-    return fold;
-  };
-  const DriveApp = {
-    createFolder: (n) => mkFolder(n),
-    getFolderById(id) {
-      const f = drive.folders.get(String(id));
-      if (!f) throw new Error('Папка не найдена: ' + id);
-      return f;
-    },
-    getFileById(id) {
-      const f = drive.files.get(String(id));
-      if (!f) throw new Error('Файл не найден: ' + id);
-      return f;
+  const ScriptApp = { getOAuthToken: () => 'тестовый-токен' };
+
+  const UrlFetchApp = {
+    fetch(url, opts = {}) {
+      const body = (code, text) => ({
+        getResponseCode: () => code,
+        getContentText: () => text,
+        getBlob: () => Utilities.newBlob(text)
+      });
+      const auth = opts.headers && opts.headers.Authorization;
+      if (!auth) return body(401, '{"error":"нет токена"}');
+
+      // создать папку
+      if (opts.method === 'post' && url.indexOf('/upload/') < 0) {
+        const id = 'folder-' + (++drive.seq);
+        drive.folders.set(id, JSON.parse(opts.payload));
+        return body(200, JSON.stringify({ id }));
+      }
+      // загрузить файл
+      if (opts.method === 'post') {
+        const raw = opts.payload;                       // байты multipart
+        const id = 'file-' + (++drive.seq);
+        const text = Buffer.from(Uint8Array.from(raw.map(x => x & 0xff))).toString('binary');
+        const meta = JSON.parse(text.slice(text.indexOf('{'), text.indexOf('}') + 1));
+        const head = text.indexOf('\r\n\r\n', text.indexOf('--hubbar', 40));
+        const mime = /Content-Type: ([^\r]+)/g;
+        const mimes = text.match(/Content-Type: ([^\r]+)/g).map(x => x.split(': ')[1]);
+        const start = head + 4, stop = text.lastIndexOf('\r\n--hubbar--');
+        const bytes = raw.slice(start, stop).map(x => x & 0xff);
+        drive.files.set(id, { id, name: meta.name, mime: mimes[mimes.length - 1], bytes, parents: meta.parents });
+        return body(200, JSON.stringify({ id }));
+      }
+      // прочитать
+      const m = url.match(/files\/([^?]+)/);
+      const id = m && decodeURIComponent(m[1]);
+      if (drive.folders.has(id)) return body(200, JSON.stringify({ id, trashed: false }));
+      const f = drive.files.get(id);
+      if (!f) return body(404, '{"error":"нет такого файла"}');
+      if (url.indexOf('alt=media') >= 0) {
+        const blob = Utilities.newBlob('');
+        blob.__bytes = f.bytes;
+        blob.getBytes = () => f.bytes.map(x => (x > 127 ? x - 256 : x));
+        return { getResponseCode: () => 200, getContentText: () => '', getBlob: () => blob };
+      }
+      return body(200, JSON.stringify({ mimeType: f.mime, name: f.name }));
     }
   };
 
@@ -335,7 +355,7 @@ export function makeEnv(opts = {}) {
 
   return {
     stats, book, props, lockCalls, cacheCalls, cacheStore, drive, outputs, logs,
-    globals: { SpreadsheetApp, PropertiesService, LockService, CacheService, DriveApp, Utilities, ContentService, Logger },
+    globals: { SpreadsheetApp, PropertiesService, LockService, CacheService, UrlFetchApp, ScriptApp, Utilities, ContentService, Logger },
     sheet: (n) => book.sheets[n],
     dump: (n) => (book.sheets[n] ? book.sheets[n].dump() : null)
   };
@@ -354,7 +374,7 @@ function topLevelNames(src) {
 }
 const NAMES = [...new Set([...topLevelNames(SEED_SRC), ...topLevelNames(CODE)])];
 
-const GLOBAL_NAMES = ['SpreadsheetApp', 'PropertiesService', 'LockService', 'CacheService', 'DriveApp', 'Utilities', 'ContentService', 'Logger'];
+const GLOBAL_NAMES = ['SpreadsheetApp', 'PropertiesService', 'LockService', 'CacheService', 'UrlFetchApp', 'ScriptApp', 'Utilities', 'ContentService', 'Logger'];
 
 /**
  * Загружает серверный код на переданном окружении и возвращает все его

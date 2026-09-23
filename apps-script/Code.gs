@@ -215,18 +215,38 @@ function dropListCache(){ try { CacheService.getScriptCache().remove(LIST_KEY) }
 
 /* Фото чека кладём на Диск, в строку закупки пишем только идентификатор файла.
    Ссылку наружу не открываем: чек отдаётся по запросу тому, кто уже прошёл
-   проверку команды, — как и всё остальное в приложении. */
-var RECEIPTS_DIR = 'HOROVOD HUB · чеки';
+   проверку команды, — как и всё остальное в приложении.
 
-// Ищем папку не по имени, а по запомненному идентификатору: поиск по имени
-// потребовал бы доступа ко всему Диску, а так скрипт видит только то, что создал сам.
+   Работаем напрямую с Drive API, а не через DriveApp: DriveApp даже для
+   создания папки требует доступа ко ВСЕМУ Диску владельца. Через API хватает
+   drive.file — скрипт видит только то, что создал сам, и ничего больше. */
+var RECEIPTS_DIR = 'HOROVOD HUB · чеки';
+var DRIVE = 'https://www.googleapis.com/drive/v3/files';
+var DRIVE_UP = 'https://www.googleapis.com/upload/drive/v3/files';
+
+function driveCall(url, opts){
+  opts = opts || {};
+  opts.muteHttpExceptions = true;
+  opts.headers = opts.headers || {};
+  opts.headers.Authorization = 'Bearer ' + ScriptApp.getOAuthToken();
+  var r = UrlFetchApp.fetch(url, opts);
+  var code = r.getResponseCode();
+  if (code < 200 || code >= 300) throw new Error('Диск ответил ' + code + ': ' + r.getContentText().slice(0, 200));
+  return r;
+}
+
 function receiptsFolder(){
   var props = PropertiesService.getScriptProperties();
   var id = props.getProperty('RECEIPTS_ID');
-  if (id) { try { return DriveApp.getFolderById(id) } catch (e) { /* папку унесли — заведём новую */ } }
-  var f = DriveApp.createFolder(RECEIPTS_DIR);
-  props.setProperty('RECEIPTS_ID', f.getId());
-  return f;
+  if (id) {
+    try { driveCall(DRIVE + '/' + id + '?fields=id,trashed'); return id } catch (e) { /* папку унесли — заведём новую */ }
+  }
+  var res = JSON.parse(driveCall(DRIVE + '?fields=id', {
+    method: 'post', contentType: 'application/json',
+    payload: JSON.stringify({name: RECEIPTS_DIR, mimeType: 'application/vnd.google-apps.folder'})
+  }).getContentText());
+  props.setProperty('RECEIPTS_ID', res.id);
+  return res.id;
 }
 
 // photo — строка вида data:image/jpeg;base64,…
@@ -238,15 +258,24 @@ function saveReceipt(photo, name){
   if (mime.indexOf('image/') !== 0) throw new Error('Чек должен быть картинкой');
   var bytes = Utilities.base64Decode(m[2]);
   if (bytes.length > 8 * 1024 * 1024) throw new Error('Фото чека слишком большое');
-  var blob = Utilities.newBlob(bytes, mime, name || ('чек-' + new Date().toISOString().slice(0,10)));
-  return receiptsFolder().createFile(blob).getId();
+
+  var meta = {name: name || ('чек-' + new Date().toISOString().slice(0,10)), parents: [receiptsFolder()]};
+  var res = JSON.parse(driveCall(DRIVE_UP + '?uploadType=multipart&fields=id', {
+    method: 'post',
+    contentType: 'multipart/related; boundary=hubbar',
+    payload: Utilities.newBlob(
+      '--hubbar\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' +
+      JSON.stringify(meta) + '\r\n--hubbar\r\nContent-Type: ' + mime + '\r\n\r\n'
+    ).getBytes().concat(bytes).concat(Utilities.newBlob('\r\n--hubbar--').getBytes())
+  }).getContentText());
+  return res.id;
 }
 
 function readReceipt(id){
   if (!id) throw new Error('У этой закупки нет фото чека');
-  var f = DriveApp.getFileById(String(id));
-  var b = f.getBlob();
-  return {mime: b.getContentType(), data: Utilities.base64Encode(b.getBytes()), name: f.getName()};
+  var meta = JSON.parse(driveCall(DRIVE + '/' + id + '?fields=mimeType,name').getContentText());
+  var blob = driveCall(DRIVE + '/' + id + '?alt=media').getBlob();
+  return {mime: meta.mimeType, data: Utilities.base64Encode(blob.getBytes()), name: meta.name};
 }
 
 function listAll(){
