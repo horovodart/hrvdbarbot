@@ -13,6 +13,7 @@ const ROOT = path.resolve(HERE, "../../..");
 
 let pass = 0, fail = 0;
 const bugs = [];
+const AMBER_DAYS = 21;
 function ok(name, cond, detail){
   if(cond){ pass++; console.log("ОК      " + name) }
   else { fail++; console.log("ПРОВАЛ  " + name + (detail ? "\n        " + detail : "")) }
@@ -279,30 +280,48 @@ const tareData = () => ({
   const t = compute(tareData(), {now:"2026-02-01T00:00:00.000Z"}).M.tare;
   eq("6.1 units — сумма ВСЕХ возвратов", t.units, 150);
   eq("6.2 amount — сумма ВСЕХ возвратов", t.amount, 28);
-  eq("6.3 back — только возвраты после первого подсчёта", t.back, 25);
-  eq("6.4 paid — залог только по товарам с dep>0", t.paid, 1.5);
-  eq("6.5 waiting = paid − back", t.waiting, -23.5);
-  ok("6.6 waiting МОЖЕТ быть отрицательным (нет кламп в ноль)", t.waiting < 0, `waiting = ${t.waiting}`);
+  eq("6.3 back — сумма всех сдач", t.back, 28);
+  // Правило Миши: тара считается ОТ ПОСЛЕДНЕЙ СДАЧИ. Последняя сдача 15.02 —
+  // позже обоих подсчётов, значит накопиться ещё ничего не успело.
+  eq("6.4 после последней сдачи накопилось ноль штук", t.unitsWaiting, 0);
+  eq("6.5 сумма = штуки × залог", t.waiting, 0);
+  ok("6.6 сумма кратна залогу", Math.abs(t.waiting / 0.15 - Math.round(t.waiting / 0.15)) < 1e-9,
+     `waiting = ${t.waiting}`);
   eq("6.7 tare.last — самая поздняя дата возврата", t.last, "2026-02-15T00:00:00.000Z");
 }
 {
   const d = tareData(); d.returns = [];
   const t = compute(d, {now:"2026-02-01T00:00:00.000Z"}).M.tare;
-  eq("6.8 без возвратов: units/amount/back = 0", [t.units, t.amount, t.back], [0,0,0]);
-  eq("6.9 без возвратов: waiting = paid", t.waiting, 1.5);
-  eq("6.10 без возвратов: last = null", t.last, null);
+  eq("6.8 без сдач: units/amount/back = 0", [t.units, t.amount, t.back], [0,0,0]);
+  // сдач не было — копится всё выпитое: pd 10 шт + pneg 0 (расход отрицательный)
+  eq("6.9 без сдач: копятся все выпитые залоговые штуки", t.unitsWaiting, 10);
+  eq("6.9a без сдач: сумма = 10 × 0,15", t.waiting, 1.5);
+  eq("6.10 без сдач: last = null", t.last, null);
 }
 {
-  // dSince > 0: добавляется залог по среднему расходу с последнего подсчёта
-  const t = compute(tareData(), {now:"2026-02-11T00:00:00.000Z"}).M.tare;
-  eq("6.11 paid добирает залог по среднему расходу за dSince", t.paid, 1.5 + (10/31)*10*0.15);
+  // после сдачи копится по среднему расходу — но целыми штуками
+  const d = tareData();
+  d.returns = [{id:"r1", date:"2026-02-01T00:00:00.000Z", amount:5, units:30, toTill:true}];
+  const t = compute(d, {now:"2026-02-11T00:00:00.000Z"}).M.tare;
+  eq("6.11 после сдачи копится по среднему расходу", t.unitsWaiting, Math.round((10/31)*10));
+  ok("6.11a и это по-прежнему кратно залогу",
+     Math.abs(t.waiting - t.unitsWaiting*0.15) < 1e-9, `waiting=${t.waiting}`);
 }
 {
-  // отрицательный расход (пересчёт вверх) не уменьшает paid
+  // сдал — обнулилось: сдача ровно «сейчас» не оставляет хвоста
+  const d = tareData();
+  d.returns = [{id:"r1", date:"2026-02-01T00:00:00.000Z", amount:5, units:30, toTill:true}];
+  const t = compute(d, {now:"2026-02-01T00:00:00.000Z"}).M.tare;
+  eq("6.12 сдал сегодня — ждёт ноль", t.unitsWaiting, 0);
+  eq("6.12a и ноль евро, а не хвост", t.waiting, 0);
+}
+{
+  // отрицательный расход (пересчёт вверх) не уходит в минус
   const d = tareData();
   d.products = d.products.filter(p => p.id === "pneg");
+  d.returns = [];
   const t = compute(d, {now:"2026-02-01T00:00:00.000Z"}).M.tare;
-  eq("6.12 отрицательный расход не уходит в минус по paid", t.paid, 0);
+  eq("6.13 отрицательный расход не уходит в минус", t.unitsWaiting, 0);
 }
 
 /* ══════════════ 7. Статусы и заказ ══════════════ */
@@ -353,7 +372,9 @@ console.log("\n— 7. items: restock / st / need —");
 
   eq("7.16 need округляется вверх до pack (11 → 12 при pack 6)", it.pAmber.need, 12);
   eq("7.17 need кратен pack (18 при pack 6)", it.pRed.need, 18);
-  eq("7.18 need зелёного тоже кратен pack (3 → 6)", it.pGreen.need, 6);
+  // Правило Миши: не предлагать то, чего хватает. Раньше нехватка в треть штуки
+  // округлялась вверх до целой упаковки, и в закупке висело то, чего хватает на месяц.
+  eq("7.18 зелёному закупка не предлагается", it.pGreen.need, 0);
   eq("7.19 need для est=0: 28 → 30 при pack 6", it.pZero.need, 30);
   eq("7.20 без pack need округляется вверх до целого", it.pNoPack.need, 18);
   eq("7.21 rate=null + не green: need = min*2 − est", it.pMin10.need, 10);
@@ -481,6 +502,34 @@ console.log("\n— 9. сверка с tools/reference.py (hub-bar-data.json) —
 }
 
 /* ------------------------------------------------------------------ */
+console.log("\n— 11. минимум — жёсткий пол —");
+{
+  // Правило Миши про воду: держаться на 12 штуках минимум, 24 в идеале.
+  // Раньше минимум работал только когда расход не измерен: вода расходилась
+  // медленно, «хватит на 57 дней» → зелёный → закупку не предлагали вовсе.
+  // пьют мало (и запаса «надолго»), но штук на полке мало
+  const water = (min, base) => ({
+    products: [{id:"w", cat:"water", cost:1, pack:6, min}],
+    counts: [
+      {id:"c1", date:"2025-01-01T00:00:00.000Z", stock:{w:20}},
+      {id:"c2", date:"2026-02-01T00:00:00.000Z", stock:{w:base}, cash:0}
+    ],
+    purchases: []
+  });
+  const low = compute(water(12, 6),  {now:"2026-02-01T00:00:00.000Z"}).M.items.w;
+  eq("11.1 расход измерен и запаса надолго…", low.daysLeft > AMBER_DAYS, true);
+  eq("11.2 …но ниже минимума — всё равно красный", low.st, "red");
+  ok("11.3 и закупка предлагается", low.need > 0, `need = ${low.need}`);
+  eq("11.4 добираем до двух минимумов, кратно упаковке", low.need, 18);   // 24 − 6 = 18
+
+  const mid = compute(water(12, 17), {now:"2026-02-01T00:00:00.000Z"}).M.items.w;
+  eq("11.5 между min и min×1.5 — жёлтый", mid.st, "amber");
+
+  const hi = compute(water(4, 19), {now:"2026-02-01T00:00:00.000Z"}).M.items.w;
+  eq("11.6 выше min×1.5 — зелёный", hi.st, "green");
+  eq("11.7 зелёному ничего не предлагаем", hi.need, 0);
+}
+
 console.log("\n— 10. показываемый остаток не убывает сам —");
 {
   // Правило Миши: приложение не занижает остаток между подсчётами. Число на

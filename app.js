@@ -107,7 +107,9 @@ function model(){
     let est = exact;
     if(rate) est = Math.max(0, exact - rate*dSince);
     const estimated = !!rate && dSince >= 1;
-    const daysLeft = rate ? est/rate : null;
+    // Срок считаем от факта, а не от прогноза: иначе запас «тает» сам и приложение
+    // краснеет между подсчётами, хотя никто ничего не мерял.
+    const daysLeft = rate ? exact/rate : null;
 
     // «общие» попадают к нам случайно, «распродаём» специально не докупаем:
     // и те и другие не тревожат красным и не просятся в закупку
@@ -115,15 +117,21 @@ function model(){
     let st = "none";
     if(restock){
       st = "green";
-      if(Math.round(est) <= 0) st = "red";
-      else if(daysLeft != null){ if(daysLeft < HORIZON) st = "red"; else if(daysLeft < AMBER) st = "amber" }
-      else if(p.min != null){ if(est <= p.min) st = "red"; else if(est <= p.min*1.5) st = "amber" }
+      // минимум — жёсткий пол: ниже него тревожим, даже если по расходу «хватит надолго»
+      if(Math.round(exact) <= 0) st = "red";
+      else if(p.min != null && exact <= p.min) st = "red";
+      else if(daysLeft != null && daysLeft < HORIZON) st = "red";
+      else if(p.min != null && exact <= p.min*1.5) st = "amber";
+      else if(daysLeft != null && daysLeft < AMBER) st = "amber";
     }
 
     let need = 0;
-    if(restock){
-      if(rate) need = Math.max(0, rate*TARGET - est);
-      else if(st !== "green" && p.min) need = p.min*2 - est;
+    // Предлагаем купить только когда есть повод. Иначе нехватка в треть штуки
+    // округлялась до целой упаковки — и в списке висело то, чего хватает на месяц.
+    if(restock && st !== "green"){
+      const byRate = rate ? rate*TARGET - exact : 0;
+      const byMin  = p.min != null ? p.min*2 - exact : 0;
+      need = Math.max(0, byRate, byMin);
       if(need>0 && p.pack) need = Math.ceil(need/p.pack)*p.pack; else need = Math.ceil(need);
     }
 
@@ -134,20 +142,32 @@ function model(){
                                 {units:0, amount:0});
   tare.last = S.returns.map(r => r.date).sort().pop() || null;
 
-  // Залог в пустой таре = уплачено за всё выпитое с начала учёта минус то, что уже сдали.
-  // Так цифра сама себя правит: сдал — она упала ровно на сумму из автомата.
-  const start = counts[0]?.date || null;
-  let paid = 0;
+  // Залог в пустой таре считаем ОТ ПОСЛЕДНЕЙ СДАЧИ: сдал — значит обнулилось.
+  // Раньше это была разница «всё выпитое с июля минус все сдачи», и там оставался
+  // хвост, который не сходился ни с чем и не был кратен залогу.
+  const lastRet = tare.last;
+  // тара копится с последнего события: что позже — подсчёт или сдача
+  const from = lastRet && (!last || lastRet > last.date) ? lastRet : last?.date;
+  const dGrow = from ? Math.max(0, days(from, new Date().toISOString())) : 0;
+  let units = 0;                                   // целые бутылки и банки с залогом
   for(const p of S.products){
-    const dep = +p.dep || 0; if(!dep) continue;
-    for(const r of recs) paid += Math.max(0, r.cons[p.id] || 0) * dep;
+    if(!(+p.dep)) continue;
+    for(const r of recs){
+      const c = Math.max(0, r.cons[p.id] || 0);
+      if(!c) continue;
+      if(!lastRet){ units += c; continue }
+      if(r.to.date <= lastRet) continue;            // период целиком до сдачи — та тара уже сдана
+      // сдача пришлась на середину периода — берём часть по дням
+      const share = r.from.date >= lastRet ? 1
+                  : Math.max(0, Math.min(1, days(lastRet, r.to.date) / (r.days || 1)));
+      units += c * share;
+    }
     const it = items[p.id];
-    if(it?.rate) paid += it.rate * dSince * dep;          // с последнего подсчёта — по среднему расходу
+    if(it?.rate) units += it.rate * dGrow;          // после подсчёта/сдачи — по среднему расходу
   }
-  const back = S.returns.filter(r => !start || r.date > start).reduce((s,r) => s + (+r.amount||0), 0);
-  tare.waiting = paid - back;      // минус означает «сдали больше выпитого» — так и покажем
-  tare.paid = paid;
-  tare.back = back;
+  tare.unitsWaiting = Math.max(0, Math.round(units));      // копим целыми штуками
+  tare.waiting = tare.unitsWaiting * C.DEPOSIT;            // поэтому сумма всегда кратна залогу
+  tare.back = S.returns.reduce((s,r) => s + (+r.amount||0), 0);
 
   // Накопительный счёт — «карма». Считается от последней амнистии: старый долг
   // не тащим, иначе планка недостижима и приложение перестают открывать.
@@ -286,7 +306,7 @@ function renderBuy(M){
       <div class="sub2">${esc(p.vol||"")}${p.pack?" · упак. "+p.pack:""}</div></div>${stepper(p.id, S.buy[p.id]||0, "b")}</div>`;
   }
   h += `</div>
-  <button class="btn ghost" id="tareBtn" style="margin-top:12px">Сдал тару · ${M.tare.waiting < 0 ? "сдано с запасом" : "ждёт сдачи ~"+eur(M.tare.waiting)}</button>
+  <button class="btn ghost" id="tareBtn" style="margin-top:12px">Сдал тару · накопилось ${M.tare.unitsWaiting} шт ~${eur(M.tare.waiting)}</button>
   <div class="fields" style="margin-top:12px">
     <div class="field"><label for="buySum">Сумма чека, €</label><input id="buySum" value="${esc(S.f.buySum||"")}" inputmode="decimal" placeholder="например 97,48"></div>
     <div class="field"><label for="buyWho">Кто купил</label><input id="buyWho" value="${esc(S.f.buyWho||"")}" placeholder="имя"></div></div>
@@ -482,12 +502,10 @@ function tareSheet(M){
       <div class="blk"><h4>Тара</h4>
         <dl class="recon num">
           <dt>Сдано за всё время</dt><dd>${M.tare.units} шт · ${eur(M.tare.amount)}</dd>
-          <dt>Сдано с начала учёта</dt><dd>${eur(M.tare.back)}</dd>
-          <dt>Залог за выпитое с начала учёта</dt><dd>${eur(M.tare.paid)}</dd>
           ${M.tare.last ? `<dt>Последняя сдача</dt><dd>${ddmm(M.tare.last)}</dd>` : ""}
-          <dt class="tot">${M.tare.waiting < 0 ? "Сдали больше выпитого" : "Ждёт сдачи · примерно"}</dt><dd class="tot ${M.tare.waiting<0?"pos":""}">${Math.abs(units(M.tare.waiting))} шт · ${eur(Math.abs(M.tare.waiting))}</dd>
+          <dt class="tot">Накопилось после сдачи</dt><dd class="tot">${M.tare.unitsWaiting} шт · ${eur(M.tare.waiting)}</dd>
         </dl>
-        <p class="note" style="margin:8px 0 0">«Ждёт сдачи» — залог за всё выпитое минус всё, что уже сдали. Цифра приблизительная: часть тары ещё стоит непустой, часть выбрасывают, а иногда наоборот — гости и соседи приносят свои бутылки, и сдаётся больше выпитого. Сверяется сама: сдал — она упала ровно на сумму из автомата.</p>
+        <p class="note" style="margin:8px 0 0">Считается от последней сдачи: сдал — обнулилось, дальше копится заново. Берутся целые бутылки и банки с залогом, поэтому сумма всегда кратна ${eur(C.DEPOSIT)}. До ближайшего подсчёта это прикидка по среднему расходу, а на подсчёте цифра перепишется на то, что выпили на самом деле.</p>
       </div>
       <div class="fields" style="margin-top:16px"><button class="btn ghost" id="tClose" style="flex:1">Закрыть</button><button class="btn" id="tSave" style="flex:1">Записать</button></div>
     </div></div>`;
@@ -633,9 +651,14 @@ function setVal(k,id,v){
 async function saveBuy(){
   const items = {}; for(const [k,v] of Object.entries(S.buy)) if(v > 0) items[k] = v;
   if(!Object.keys(items).length) return;
+  // Без суммы и без имени закупка бесполезна: по ней не пересчитать цену за штуку
+  // и не спросить, если что-то не сходится.
+  const total = num($("#buySum")?.value), who = $("#buyWho")?.value.trim();
+  if(!(total > 0)){ toast("Впиши сумму чека"); $("#buySum")?.focus(); return }
+  if(!who){ toast("Впиши, кто закупал"); $("#buyWho")?.focus(); return }
   const b = $("#dockBtn"); b.disabled = true;
   try{
-    await apply(API.addPurchase({date:new Date().toISOString(), items, total:num($("#buySum")?.value)||null, by:$("#buyWho")?.value.trim()||null}));
+    await apply(API.addPurchase({date:new Date().toISOString(), items, total, by:who}));
     S.buy = {}; S.f.buySum = ""; toast("Закупка добавлена на склад"); haptic("medium");
     S.tab = "menu"; document.querySelectorAll(".tab").forEach(x => x.setAttribute("aria-selected", x.dataset.tab === "menu")); render(); scrollTo(0,0);
   }catch(e){ toast("Не сохранилось: "+e.message); b.disabled = false }

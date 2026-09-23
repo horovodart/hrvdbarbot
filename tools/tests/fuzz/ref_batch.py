@@ -12,7 +12,7 @@ import reference  # tools/reference.py
 REC = ("saleUnits","freeUnits","expected","got","backed","short","frozen","price",
        "costSale","costWater","depSpent","net","ideal","payRate","breakEven")
 ITEM = ("est","exact","estimated","rate","daysLeft","st","need","restock")
-TARE = ("units","amount","back","paid","waiting")
+TARE = ("units","amount","back","unitsWaiting","waiting")
 ALL  = ("expected","got","cost","units","short","net","payRate","since","periods","streak","goalReached")
 PER  = ("days","cons","bought","measured","perWeek")
 

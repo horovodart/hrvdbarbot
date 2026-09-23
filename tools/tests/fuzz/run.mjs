@@ -16,7 +16,7 @@ const TOL   = 1e-6;
 const REC  = ["saleUnits","freeUnits","expected","got","backed","short","frozen","price",
               "costSale","costWater","depSpent","net","ideal","payRate","breakEven"];
 const ITEM = ["est","exact","estimated","rate","daysLeft","st","need","restock"];
-const TARE = ["units","amount","back","paid","waiting"];
+const TARE = ["units","amount","back","unitsWaiting","waiting"];
 const ALL  = ["expected","got","cost","units","short","net","payRate","since","periods","streak","goalReached"];
 const PER  = ["days","cons","bought","measured","perWeek"];
 

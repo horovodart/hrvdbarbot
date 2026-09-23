@@ -9,6 +9,7 @@
 import json, math, sys, datetime as dt
 
 SALE, HORIZON, AMBER, TARGET = 1.50, 14, 21, 28
+DEPOSIT = 0.15
 GOAL_RATE, GOAL_PERIODS = 0.66, 2
 FREE = ("water", "snack")
 
@@ -87,37 +88,47 @@ def compute(d, now=None):
         rate = max(0.0, tot / dd) if dd > 0 else None
         exact = (base or 0) + since.get(pid, 0)
         est = max(0.0, exact - rate * dSince) if rate else exact
-        left = est / rate if rate else None
+        # срок — от факта: прогноз не должен красить приложение между подсчётами
+        left = exact / rate if rate else None
         restock = p["cat"] != "shared" and not p.get("phaseout")
+        mn = p.get("min")
         st = "none"
         if restock:
             st = "green"
-            if jsround(est) <= 0: st = "red"
-            elif left is not None:
-                if left < HORIZON: st = "red"
-                elif left < AMBER: st = "amber"
-            elif p.get("min") is not None:
-                if est <= p["min"]: st = "red"
-                elif est <= p["min"] * 1.5: st = "amber"
+            if jsround(exact) <= 0: st = "red"                    # минимум — жёсткий пол
+            elif mn is not None and exact <= mn: st = "red"
+            elif left is not None and left < HORIZON: st = "red"
+            elif mn is not None and exact <= mn * 1.5: st = "amber"
+            elif left is not None and left < AMBER: st = "amber"
         need = 0
-        if restock:
-            if rate: need = max(0.0, rate * TARGET - est)
-            elif st != "green" and p.get("min"): need = p["min"] * 2 - est
+        # без повода не предлагаем: нехватка в треть штуки округлялась до упаковки
+        if restock and st != "green":
+            by_rate = rate * TARGET - exact if rate else 0
+            by_min  = mn * 2 - exact if mn is not None else 0
+            need = max(0.0, by_rate, by_min)
             need = math.ceil(need / p["pack"]) * p["pack"] if need > 0 and p.get("pack") else math.ceil(need)
         items[pid] = dict(est=est, exact=exact, estimated=bool(rate) and dSince >= 1, periods=periods, rate=rate, daysLeft=left, st=st, need=need, restock=restock,
                           bought=since.get(pid, 0), base=base)
 
-    start = counts[0]["date"] if counts else None
-    paid = 0.0
+    # Залог в пустой таре считаем ОТ ПОСЛЕДНЕЙ СДАЧИ и целыми штуками
+    last_ret = max((r["date"] for r in rets), default=None)
+    frm = last_ret if (last_ret and (not last or last_ret > last["date"])) else (last["date"] if last else None)
+    d_grow = max(0.0, days(frm, now)) if frm else 0.0
+    units_w = 0.0
     for pid, p in P.items():
-        dep = p.get("dep") or 0
-        if not dep: continue
-        for r in recs: paid += max(0, r["cons"].get(pid, 0)) * dep
-        if items[pid]["rate"]: paid += items[pid]["rate"] * dSince * dep
-    back = sum(r.get("amount", 0) for r in rets if not start or r["date"] > start)
+        if not (p.get("dep") or 0): continue
+        for r in recs:
+            c = max(0, r["cons"].get(pid, 0))
+            if not c: continue
+            if not last_ret: units_w += c; continue
+            if r["to"]["date"] <= last_ret: continue
+            share = 1.0 if r["frm"]["date"] >= last_ret else max(0.0, min(1.0, days(last_ret, r["to"]["date"]) / (r["days"] or 1)))
+            units_w += c * share
+        if items[pid]["rate"]: units_w += items[pid]["rate"] * d_grow
+    units_waiting = max(0, jsround(units_w))
     tare = dict(units=sum(r.get("units", 0) for r in rets), amount=sum(r.get("amount", 0) for r in rets),
-                waiting=paid - back, paid=paid, back=back,
-                last=max((r["date"] for r in rets), default=None))
+                unitsWaiting=units_waiting, waiting=units_waiting * DEPOSIT,
+                back=sum(r.get("amount", 0) for r in rets), last=last_ret)
     # «карма» — считается от последней амнистии, старый долг не тащим
     amnesty_at = max((c["date"] for c in counts if c.get("amnesty")), default=None)
     scored = [r for r in recs if r["frm"]["date"] >= amnesty_at] if amnesty_at else recs
@@ -145,5 +156,5 @@ if __name__ == "__main__":
         print(f"  {k:12} {r[k]:>10.2f}")
     print(f"  {'payRate':12} {r['payRate']*100:>9.1f}%   breakEven {r['breakEven']*100:.1f}%")
     t = M["tare"]
-    print(f"тара: сдано {t['units']} шт / {t['amount']:.2f} € · ждёт {t['waiting']:.2f} € · залог за выпитое {t['paid']:.2f} €")
+    print(f"тара: сдано {t['units']} шт / {t['amount']:.2f} € · после последней сдачи накопилось {t['unitsWaiting']} шт / {t['waiting']:.2f} €")
     print(f"dSince {M['dSince']:.3f} дн")
