@@ -843,10 +843,20 @@ test('чеки уходят в заданный чат, а по умолчани
   assert.equal(b.env.drive.sent[0].chat, '-100500', 'RECEIPTS_CHAT перебивает умолчание');
 });
 
-test('без токена бота и без адреса чата — понятная ошибка', () => {
-  const noChat = newApp({ sheets: bootedBook(), props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
-  throws(() => noChat.api.handle('addPurchase', { total: 1, items:{aro05:1}, photo: PNG1 },
-    { id:'1', name:'Миша' }), /Некуда сохранить/i, 'нет ни чата, ни админов');
+test('без свойств адрес берётся из листа команды', () => {
+  const app = newApp({ sheets: bootedBook(), props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
+  const admin = app.api.rows('team').filter(r => String(r.role).toLowerCase() === 'admin')[0];
+  assert.ok(admin, 'подготовка: в листе команды есть админ');
+  app.api.handle('addPurchase', { total: 72, items:{aro05:1}, photo: PNG1 }, { id:'1', name:'Миша' });
+  assert.equal(app.env.drive.sent[0].chat, String(admin.tg_id), 'ушло первому админу из листа');
+});
+
+test('совсем некуда сохранить — понятная ошибка, а не «undefined»', () => {
+  const sheets = bootedBook();
+  sheets.team = [sheets.team[0]];                      // одна шапка, ни одного человека
+  const app = newApp({ sheets, props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
+  throws(() => app.api.handle('addPurchase', { total: 1, items:{aro05:1}, photo: PNG1 },
+    { id:'1', name:'Миша' }), /Некуда сохранить/i);
 });
 
 test('чек отдаётся обратно тем же, чем положили', () => {

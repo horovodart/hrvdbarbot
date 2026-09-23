@@ -229,8 +229,11 @@ function receiptsChat(){
   var c = prop('RECEIPTS_CHAT');
   if (c) return String(c).trim();
   var admins = String(prop('ADMIN_IDS') || '').split(',').map(function(x){ return x.trim() }).filter(String);
-  if (!admins.length) throw new Error('Некуда сохранить чек: задай RECEIPTS_CHAT или ADMIN_IDS');
-  return admins[0];
+  if (admins.length) return admins[0];
+  // ничего не задано — берём первого админа из листа команды: он там всегда есть
+  var team = rows('team').filter(function(r){ return String(r.role || '').toLowerCase() === 'admin' && String(r.tg_id || '').trim() });
+  if (team.length) return String(team[0].tg_id).trim();
+  throw new Error('Некуда сохранить чек: в листе team нет ни одного админа');
 }
 
 function tg(method, payload, isMultipart){
