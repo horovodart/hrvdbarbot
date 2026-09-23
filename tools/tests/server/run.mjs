@@ -840,11 +840,12 @@ test('лист без новых колонок: они досоздаются, 
   assert.ok(env.dump('purchases')[0].indexOf('receipt') >= 0, 'колонка появилась в шапке');
 });
 
-test('берётся самый крупный из размеров, что вернул Telegram', () => {
-  const { api } = readyApp();
-  const out = api.handle('addPurchase', { total: 60, items:{aro05:1}, photo: PNG1 }, { id:'1', name:'Миша' });
-  const buy = Object.values(out.purchases).find(x => x.total === 60);
-  assert.ok(!/мелкий/.test(String(buy.receipt)), 'сохранили мелкий превью вместо оригинала: ' + buy.receipt);
+test('чек уходит документом, а не фотографией', () => {
+  // sendPhoto пережимает картинку — мелкий шрифт на чеке из Metro превращается
+  // в кашу, а он и есть весь смысл затеи. Документы Telegram хранит как есть.
+  const { env, api } = readyApp();
+  api.handle('addPurchase', { total: 60, items:{aro05:1}, photo: PNG1 }, { id:'1', name:'Миша' });
+  assert.equal(env.drive.sent[0].kind, 'document', 'отправлено документом');
 });
 
 test('чеки уходят в заданный чат, а по умолчанию — первому админу', () => {

@@ -259,16 +259,17 @@ function saveReceipt(photo, caption){
   var bytes = Utilities.base64Decode(m[2]);
   if (bytes.length > 8 * 1024 * 1024) throw new Error('Фото чека слишком большое');
 
+  // Отправляем ДОКУМЕНТОМ, а не фотографией: sendPhoto пережимает картинку, и мелкий
+  // шрифт на чеке из Metro становится нечитаемым — а он и есть весь смысл затеи.
+  // Документы Telegram хранит байт в байт.
   var ext = mime.split('/')[1].replace('jpeg', 'jpg');
-  var res = tg('sendPhoto', {
+  var res = tg('sendDocument', {
     chat_id: receiptsChat(),
     caption: String(caption || '').slice(0, 900),
-    photo: Utilities.newBlob(bytes, mime, 'чек.' + ext)
+    document: Utilities.newBlob(bytes, mime, 'чек.' + ext)
   }, true);
-  // берём самый крупный из присланных размеров
-  var sizes = res.photo || [];
-  if (!sizes.length) throw new Error('Telegram не вернул фото');
-  return sizes[sizes.length - 1].file_id;
+  if (!res.document || !res.document.file_id) throw new Error('Telegram не вернул файл');
+  return res.document.file_id;
 }
 
 function readReceipt(id){

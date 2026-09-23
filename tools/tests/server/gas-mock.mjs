@@ -269,14 +269,17 @@ export function makeEnv(opts = {}) {
         getResponseCode: () => code, getContentText: () => text,
         getBlob: () => blob || Utilities.newBlob(text)
       });
-      if (url.indexOf('/sendPhoto') >= 0) {
+      if (url.indexOf('/sendDocument') >= 0) {
         const p = opts.payload || {};
-        if (!p.photo) return body(200, JSON.stringify({ ok: false, description: 'нет фото' }));
+        if (!p.document) return body(200, JSON.stringify({ ok: false, description: 'нет файла' }));
         const id = 'tgfile-' + (++drive.seq);
-        drive.files.set(id, { id, blob: p.photo, caption: p.caption, chat: p.chat_id });
-        drive.sent.push({ chat: p.chat_id, caption: p.caption });
-        return body(200, JSON.stringify({ ok: true,
-          result: { photo: [{ file_id: id + '-мелкий' }, { file_id: id }] } }));
+        drive.files.set(id, { id, blob: p.document, caption: p.caption, chat: p.chat_id });
+        drive.sent.push({ chat: p.chat_id, caption: p.caption, kind: 'document' });
+        return body(200, JSON.stringify({ ok: true, result: { document: { file_id: id } } }));
+      }
+      if (url.indexOf('/sendPhoto') >= 0) {
+        // фотографией слать нельзя: Telegram её пережимает
+        return body(200, JSON.stringify({ ok: false, description: 'мок принимает только документы' }));
       }
       if (url.indexOf('/getFile') >= 0) {
         const id = JSON.parse(opts.payload).file_id;

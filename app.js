@@ -681,9 +681,11 @@ function setVal(k,id,v){
   const el = document.getElementById(k+"-"+id);
   if(el) el.classList.toggle("changed", k === "b" ? v > 0 : v !== Math.round(S.M.items[id].exact));
 }
-/* Фото с телефона весит мегабайты, а в строку закупки должен уехать разумный кадр:
-   ужимаем до 1600 px по длинной стороне. Чек после этого читается, а запрос не пухнет. */
-function shrink(file, max = 1600, q = 0.72){
+/* Чек — это плотный мелкий текст, а не этикетка: ужимать его как картинку нельзя,
+   иначе цены и названия превращаются в кашу. Держим до 2400 px по длинной стороне
+   и высокое качество; снимок с телефона после этого весит около мегабайта —
+   для одного запроса в месяц это нормально, а строки чека остаются читаемыми. */
+function shrink(file, max = 2400, q = 0.88){
   return new Promise((ok, no) => {
     const fr = new FileReader();
     fr.onerror = () => no(new Error("Не получилось прочитать файл"));
@@ -709,7 +711,8 @@ addEventListener("change", async e => {
   if(!/^image\//.test(f.type)) return toast("Нужна фотография чека");
   try{
     S.f.photo = await shrink(f);
-    toast("Чек прикреплён");
+    const kb = Math.round(S.f.photo.length * 0.75 / 1024);
+    toast(`Чек прикреплён · ${kb >= 1024 ? (kb/1024).toFixed(1)+" МБ" : kb+" КБ"}`);
     haptic("light");
     render();
   }catch(err){ toast("Не вышло: "+err.message) }
