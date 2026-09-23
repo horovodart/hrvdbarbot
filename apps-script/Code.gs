@@ -14,11 +14,11 @@
 var COLS = {
   products: ['id','name','vol','cat','shape','color','cap','cost','dep','pack','min','order','note','hidden','phaseout'],
   counts:   ['id','date','by','cash','card','initial','note','source','stock','frozen','amnesty'],
-  purchases:['id','date','by','total','source','items'],
+  purchases:['id','date','by','total','source','items','receipt','prices'],
   returns:  ['id','date','by','amount','units','toTill','note'],
   team:     ['tg_id','name','role']
 };
-var JSON_FIELDS = {stock:1, items:1, frozen:1};
+var JSON_FIELDS = {stock:1, items:1, frozen:1, prices:1};
 var NUM_FIELDS  = {cost:1, dep:1, pack:1, min:1, order:1, cash:1, card:1, total:1, amount:1, units:1};
 var BOOL_FIELDS = {hidden:1, initial:1, phaseout:1, toTill:1, amnesty:1};
 
@@ -139,8 +139,28 @@ function handle(action, p, user){
   try {
     var who = user ? user.name : null;
     if (action === 'addPurchase'){
-      insert('purchases', {id: uid('p'), date: p.date || new Date().toISOString(), by: p.by || who,
-                           total: p.total, source: p.source || null, items: p.items || {}});
+      var pid = uid('p');
+      var receipt = p.photo ? saveReceipt(p.photo, 'чек ' + (p.date || '').slice(0,10) + ' ' + pid) : '';
+      // Цены с чека — главный смысл загрузки: по ним обновляется цена закупки,
+      // а в карточке видно, что и с чего на что поменялось.
+      var prices = {}, moved = {};
+      if (p.prices && typeof p.prices === 'object') {
+        var prod = {};
+        rows('products').forEach(function(r){ prod[r.id] = r });
+        Object.keys(p.prices).forEach(function(k){
+          var np = Number(p.prices[k]);
+          if (!isFinite(np) || np <= 0 || !prod[k]) return;
+          var was = prod[k].cost == null ? null : Number(prod[k].cost);
+          prices[k] = np;
+          if (was == null || Math.abs(was - np) >= 0.005) {
+            moved[k] = {was: was, now: np};
+            patch('products', k, {cost: np});
+          }
+        });
+      }
+      insert('purchases', {id: pid, date: p.date || new Date().toISOString(), by: p.by || who,
+                           total: p.total, source: p.source || null, items: p.items || {},
+                           receipt: receipt, prices: {list: prices, moved: moved}});
     } else if (action === 'addCount'){
       ensureCols('counts');
       insert('counts', {id: uid('c'), date: p.date || new Date().toISOString(), by: p.by || who,
@@ -158,6 +178,10 @@ function handle(action, p, user){
     } else if (action === 'delete'){
       if (['products','counts','purchases','returns'].indexOf(p.col) < 0) throw new Error('Нельзя удалять из ' + p.col);
       remove(p.col, p.id);
+    } else if (action === 'getReceipt'){
+      var buy = rows('purchases').filter(function(r){ return r.id === p.id })[0];
+      if (!buy) throw new Error('Закупка не найдена');
+      return readReceipt(buy.receipt);
     } else throw new Error('Неизвестное действие: ' + action);
     dropListCache();
     return listCached(true);
@@ -188,6 +212,36 @@ function listCached(fresh){
 }
 
 function dropListCache(){ try { CacheService.getScriptCache().remove(LIST_KEY) } catch (e) {} }
+
+/* Фото чека кладём на Диск, в строку закупки пишем только идентификатор файла.
+   Ссылку наружу не открываем: чек отдаётся по запросу тому, кто уже прошёл
+   проверку команды, — как и всё остальное в приложении. */
+var RECEIPTS_DIR = 'HOROVOD HUB · чеки';
+
+function receiptsFolder(){
+  var it = DriveApp.getFoldersByName(RECEIPTS_DIR);
+  return it.hasNext() ? it.next() : DriveApp.createFolder(RECEIPTS_DIR);
+}
+
+// photo — строка вида data:image/jpeg;base64,…
+function saveReceipt(photo, name){
+  if (!photo) return '';
+  var m = String(photo).match(/^data:([\w\/+.-]+);base64,(.+)$/);
+  if (!m) throw new Error('Фото чека в непонятном виде');
+  var mime = m[1];
+  if (mime.indexOf('image/') !== 0) throw new Error('Чек должен быть картинкой');
+  var bytes = Utilities.base64Decode(m[2]);
+  if (bytes.length > 8 * 1024 * 1024) throw new Error('Фото чека слишком большое');
+  var blob = Utilities.newBlob(bytes, mime, name || ('чек-' + new Date().toISOString().slice(0,10)));
+  return receiptsFolder().createFile(blob).getId();
+}
+
+function readReceipt(id){
+  if (!id) throw new Error('У этой закупки нет фото чека');
+  var f = DriveApp.getFileById(String(id));
+  var b = f.getBlob();
+  return {mime: b.getContentType(), data: Utilities.base64Encode(b.getBytes()), name: f.getName()};
+}
 
 function listAll(){
   if (sheet('products').getLastRow() < 2) setup();   // первый запуск — заливаем стартовые данные сами

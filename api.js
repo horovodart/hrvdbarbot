@@ -89,6 +89,8 @@ window.API = (function(){
     // fresh — кнопка «обновить»: минуя кэш скрипта, прямо из таблицы
     async list(fresh){ return norm(await post("list", fresh ? {fresh:true} : {})) },
     async addPurchase(x){ return norm(await post("addPurchase", x)) },
+    // фото чека тянем только когда карточку открыли: оно тяжёлое, в общий список не кладём
+    async receipt(id){ return post("getReceipt", {id}) },
     async addReturn(x){ return norm(await post("addReturn", x)) },
     async addCount(x){ return norm(await post("addCount", x)) },
     async addProduct(id, data){ return norm(await post("addProduct", {id, data})) },

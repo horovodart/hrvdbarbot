@@ -810,6 +810,85 @@ test('fresh:true обходит кэш и перечитывает лист', ()
   assert.ok(env.stats.total > 0, 'кнопка «обновить» обязана идти в таблицу, а не в кэш');
 });
 
+G('11. чек закупки');
+
+const PNG1 = 'data:image/jpeg;base64,' + Buffer.from('фото чека, как будто').toString('base64');
+
+test('закупка с фото: файл лёг на Диск, в строке — только его id', () => {
+  const { env, api } = readyApp();
+  const out = api.handle('addPurchase', { date:'2026-10-01T10:00:00.000Z', total: 50,
+    items:{aro05:6}, photo: PNG1 }, { id:'1', name:'Миша' });
+  const buy = Object.values(out.purchases).find(x => x.total === 50);
+  assert.ok(buy, 'закупка записалась');
+  assert.ok(buy.receipt, 'id файла записан в строку');
+  assert.ok(!/base64/.test(String(buy.receipt)), 'в таблицу не должно попасть само фото');
+  assert.equal(env.drive.files.size, 1, 'на Диске ровно один файл');
+});
+
+test('чек отдаётся обратно тем же, чем положили', () => {
+  const { api } = readyApp();
+  const out = api.handle('addPurchase', { total: 51, items:{aro05:1}, photo: PNG1 }, { id:'1', name:'Миша' });
+  const id = Object.values(out.purchases).find(x => x.total === 51).id
+          || Object.entries(out.purchases).find(([,x]) => x.total === 51)[0];
+  const got = api.handle('getReceipt', { id }, { id:'1', name:'Миша' });
+  assert.equal(got.mime, 'image/jpeg', 'тип картинки сохранён');
+  assert.equal('data:' + got.mime + ';base64,' + got.data, PNG1, 'байты вернулись те же');
+});
+
+test('закупка без фото работает как раньше', () => {
+  const { env, api } = readyApp();
+  const out = api.handle('addPurchase', { total: 52, items:{aro05:1} }, { id:'1', name:'Миша' });
+  assert.ok(Object.values(out.purchases).some(x => x.total === 52), 'записалась');
+  assert.equal(env.drive.files.size, 0, 'на Диск ничего не клали');
+});
+
+test('не картинку и мусор вместо фото не принимаем', () => {
+  const { api } = readyApp();
+  throws(() => api.handle('addPurchase', { total: 1, items:{aro05:1}, photo: 'просто строка' },
+    { id:'1', name:'Миша' }), /непонятн/i, 'мусор');
+  throws(() => api.handle('addPurchase', { total: 1, items:{aro05:1},
+    photo: 'data:application/pdf;base64,' + Buffer.from('pdf').toString('base64') },
+    { id:'1', name:'Миша' }), /картинк/i, 'не картинка');
+});
+
+test('цены с чека обновляют справочник и запоминают, что было', () => {
+  const { api } = readyApp();
+  const before = api.handle('list', {}, { id:'1', name:'Миша' }).products.aro05.cost;
+  const out = api.handle('addPurchase', { total: 9, items:{aro05:6}, prices:{ aro05: before + 0.10 } },
+    { id:'1', name:'Миша' });
+  assert.equal(out.products.aro05.cost, before + 0.10, 'цена закупки обновилась');
+  const buy = Object.values(out.purchases).find(x => x.total === 9);
+  assert.equal(buy.prices.moved.aro05.was, before, 'запомнили прежнюю цену');
+  assert.equal(buy.prices.moved.aro05.now, before + 0.10, 'и новую');
+});
+
+test('цена не изменилась — в «поменялось» пусто', () => {
+  const { api } = readyApp();
+  const before = api.handle('list', {}, { id:'1', name:'Миша' }).products.aro05.cost;
+  const out = api.handle('addPurchase', { total: 9, items:{aro05:6}, prices:{ aro05: before } },
+    { id:'1', name:'Миша' });
+  const buy = Object.values(out.purchases).find(x => x.total === 9);
+  assert.deepEqual(buy.prices.moved, {}, 'нечего показывать — цена та же');
+  assert.equal(buy.prices.list.aro05, before, 'но саму цену с чека сохранили');
+});
+
+test('цена на несуществующий товар и мусорная цена игнорируются', () => {
+  const { api } = readyApp();
+  const out = api.handle('addPurchase', { total: 9, items:{aro05:1},
+    prices:{ нетакого: 5, aro05: -3 } }, { id:'1', name:'Миша' });
+  const buy = Object.values(out.purchases).find(x => x.total === 9);
+  assert.deepEqual(buy.prices.list, {}, 'ничего из этого в цены не попало');
+  assert.deepEqual(buy.prices.moved, {}, 'и ничего не переписали');
+});
+
+test('getReceipt у закупки без фото — понятная ошибка, замок отпущен', () => {
+  const { env, api } = readyApp();
+  const out = api.handle('addPurchase', { total: 53, items:{aro05:1} }, { id:'1', name:'Миша' });
+  const id = Object.entries(out.purchases).find(([,x]) => x.total === 53)[0];
+  throws(() => api.handle('getReceipt', { id }, { id:'1', name:'Миша' }), /нет фото/i);
+  assert.equal(env.lockCalls.held, 0, 'замок не остался висеть');
+});
+
 test('производительность: обращений к листу на один list', () => {
   const { env, api } = readyApp();
   env.stats.reset();

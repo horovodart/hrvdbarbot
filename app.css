@@ -194,3 +194,28 @@ button.sec:active{opacity:.6}
 .goal-bar i{display:block;height:100%;border-radius:999px;background:var(--red);transition:width .3s}
 .goal-bar i.ok{background:var(--green)}
 .goal-bar b{position:absolute;top:-4px;width:2px;height:18px;border-radius:1px;background:var(--ink);opacity:.5}
+
+/* ---------- чек закупки ---------- */
+.shot{display:flex;align-items:center;gap:14px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.shot-i{flex:0 0 66px;height:66px;border-radius:14px;background:#F2F4F8;display:grid;place-items:center;
+  color:var(--accent);overflow:hidden}
+.shot-i img{width:100%;height:100%;object-fit:cover}
+.shot-t{display:flex;flex-direction:column;gap:3px}
+.shot-t b{font-size:16px}
+.shot-t small{color:var(--dim);font-size:13px}
+.shot:active .shot-i{background:#E7EBF3}
+
+.lnk{background:none;border:0;padding:8px 2px;margin:6px 0 0;color:var(--dim);font:inherit;font-size:14px;
+  text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.lnk:active{color:var(--accent)}
+.rcpt{display:block;margin-top:8px}
+
+.moved{margin-top:10px;border-top:1px solid var(--line);padding-top:8px;display:grid;gap:4px}
+.moved div{display:flex;justify-content:space-between;gap:12px;font-size:14px}
+.moved span{color:var(--dim)}
+.moved .pos{color:#0A8A4A}
+.moved .neg{color:#C8371F}
+
+.sheetbg.photo{align-items:center;justify-content:center;padding:18px}
+.photowrap{max-width:100%;max-height:90vh;display:flex;flex-direction:column;gap:12px;align-items:stretch}
+.photowrap img{max-width:100%;max-height:78vh;object-fit:contain;border-radius:14px;background:#fff}

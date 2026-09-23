@@ -259,8 +259,56 @@ export function makeEnv(opts = {}) {
   };
   const CacheService = { getScriptCache: () => cacheObj, getUserCache: () => cacheObj, getDocumentCache: () => cacheObj };
 
+  /* DriveApp: папки и файлы в памяти */
+  const drive = { folders: new Map(), files: new Map(), seq: 0 };
+  const mkFile = (blob, name) => {
+    const id = 'file-' + (++drive.seq);
+    const f = { id, name, blob,
+      getId: () => id, getName: () => name, getBlob: () => blob };
+    drive.files.set(id, f);
+    return f;
+  };
+  const mkFolder = (name) => {
+    const fold = { name, getName: () => name,
+      createFile: (blob) => mkFile(blob, blob.getName ? blob.getName() : name) };
+    drive.folders.set(name, fold);
+    return fold;
+  };
+  const DriveApp = {
+    getFoldersByName(n) {
+      const has = drive.folders.has(n);
+      let used = false;
+      return { hasNext: () => has && !used, next: () => { used = true; return drive.folders.get(n) } };
+    },
+    createFolder: (n) => mkFolder(n),
+    getFileById(id) {
+      const f = drive.files.get(String(id));
+      if (!f) throw new Error('Файл не найден: ' + id);
+      return f;
+    }
+  };
+
   const Utilities = {
-    newBlob(s) { return { getBytes: () => signed(bytes(s)), getDataAsString: () => String(s) }; },
+    newBlob(s, mime, name) {
+      const raw = (s && s.__bytes) ? s.__bytes : bytes(s);
+      return {
+        __bytes: raw,
+        getBytes: () => signed(raw),
+        getDataAsString: () => String(s),
+        getContentType: () => mime || 'application/octet-stream',
+        getName: () => name || 'blob'
+      };
+    },
+    base64Encode(b) {
+      const arr = (b && b.__bytes) ? b.__bytes : (Array.isArray(b) ? b.map(x => x & 0xff) : bytes(b));
+      return Buffer.from(Uint8Array.from(arr)).toString('base64');
+    },
+    base64Decode(str) {
+      const buf = Buffer.from(String(str), 'base64');
+      const out = Array.from(buf).map(x => (x > 127 ? x - 256 : x));   // Apps Script отдаёт знаковые байты
+      out.__bytes = Array.from(buf);
+      return out;
+    },
     computeHmacSha256Signature(value, key) {
       return signed(crypto.createHmac('sha256', bytes(key)).update(bytes(value)).digest());
     },
@@ -285,8 +333,8 @@ export function makeEnv(opts = {}) {
   const Logger = { log: (m) => logs.push(String(m)) };
 
   return {
-    stats, book, props, lockCalls, cacheCalls, cacheStore, outputs, logs,
-    globals: { SpreadsheetApp, PropertiesService, LockService, CacheService, Utilities, ContentService, Logger },
+    stats, book, props, lockCalls, cacheCalls, cacheStore, drive, outputs, logs,
+    globals: { SpreadsheetApp, PropertiesService, LockService, CacheService, DriveApp, Utilities, ContentService, Logger },
     sheet: (n) => book.sheets[n],
     dump: (n) => (book.sheets[n] ? book.sheets[n].dump() : null)
   };
@@ -305,7 +353,7 @@ function topLevelNames(src) {
 }
 const NAMES = [...new Set([...topLevelNames(SEED_SRC), ...topLevelNames(CODE)])];
 
-const GLOBAL_NAMES = ['SpreadsheetApp', 'PropertiesService', 'LockService', 'CacheService', 'Utilities', 'ContentService', 'Logger'];
+const GLOBAL_NAMES = ['SpreadsheetApp', 'PropertiesService', 'LockService', 'CacheService', 'DriveApp', 'Utilities', 'ContentService', 'Logger'];
 
 /**
  * Загружает серверный код на переданном окружении и возвращает все его

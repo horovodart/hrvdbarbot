@@ -298,7 +298,21 @@ function renderBuy(M){
   }
   if(!needs.length) h += `</div>`;
 
-  h += `<h2 class="sec">Отметить закупку<em>плюсами — что купил</em></h2><div class="panel">`;
+  h += `<h2 class="sec">Чек<em>главный способ завести закупку</em></h2>
+  <div class="panel pad">
+    <label class="shot" for="rcpt">
+      <span class="shot-i">${S.f.photo ? `<img src="${S.f.photo}" alt="">` : `<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h2L9 4h6l1.5 2h2A2.5 2.5 0 0 1 21 8.5v9A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5z"/><circle cx="12" cy="13" r="3.5"/></svg>`}</span>
+      <span class="shot-t"><b>${S.f.photo ? "Чек прикреплён" : "Сфотографировать чек"}</b>
+        <small>${S.f.photo ? "нажми, чтобы переснять" : "фото сохранится в карточке закупки"}</small></span>
+    </label>
+    <input type="file" accept="image/*" capture="environment" id="rcpt" hidden>
+    <p class="note" style="margin:10px 0 0">${C.RECOGNIZE
+      ? "Приложение само разберёт чек: что куплено, по какой цене за штуку, и обновит закупочные цены."
+      : "Разбор чека пока не подключён — фото сохранится к закупке, а количества отметь ниже."}</p>
+  </div>
+  <button class="lnk" id="manualToggle" aria-expanded="${C.RECOGNIZE && !S.f.manual ? "false" : "true"}">ввести вручную</button>
+  <div id="manual"${C.RECOGNIZE && !S.f.manual ? " hidden" : ""}>
+  <h2 class="sec">Отметить закупку<em>плюсами — что купил</em></h2><div class="panel">`;
   // позиции на сбыт не докупаем — в списке закупки им делать нечего
   for(const cat of CATS) for(const p of all.filter(x => x.cat===cat && !x.phaseout)){
     h += `<div class="row"><div class="mini">${pic(p)}</div><div class="info"><div class="nm">${esc(p.name)}</div>
@@ -309,6 +323,7 @@ function renderBuy(M){
   <div class="fields" style="margin-top:12px">
     <div class="field"><label for="buySum">Сумма чека, €</label><input id="buySum" value="${esc(S.f.buySum||"")}" inputmode="decimal" placeholder="например 97,48"></div>
     <div class="field"><label for="buyWho">Кто купил</label><input id="buyWho" value="${esc(S.f.buyWho||"")}" placeholder="имя"></div></div>
+  </div>
   <details class="panel pad" style="margin-top:16px"><summary style="cursor:pointer;font-weight:600">+ Новый напиток</summary><div class="stack" style="margin-top:14px">
     <div class="fields"><div class="field"><label for="npName">Название</label><input id="npName" placeholder="Birell 0,0%"></div><div class="field"><label for="npVol">Объём</label><input id="npVol" placeholder="0,5 л, стекло"></div></div>
     <div class="fields"><div class="field"><label for="npCat">Категория</label><select id="npCat"><option value="sale">По 1,50 €</option><option value="water">Вода</option><option value="snack">Снеки</option><option value="shared">Другое, на полках</option></select></div>
@@ -388,8 +403,15 @@ function renderHist(M){
         <div style="text-align:right;margin-top:6px">${r.to.by?`<span class="note">считал(а): ${esc(r.to.by)}</span>`:""} <button class="del ${S.armed==="counts/"+r.to.id?"armed":""}" data-del="counts/${esc(r.to.id)}">${S.armed==="counts/"+r.to.id?"точно удалить?":"удалить"}</button></div></div>`;
     } else if(e.t === "buy"){ const p = e.p;
       const list = Object.entries(p.items||{}).filter(([,v])=>v>0).map(([k,v])=>`${esc(name(k))} +${esc(v)}`).join(" · ");
+      const moved = p.prices?.moved && typeof p.prices.moved === "object" ? Object.entries(p.prices.moved) : [];
       h += `<div class="panel pad"><div class="h"><b>Закупка ${ddmm(p.date)}</b>${p.total?`<span class="num">${eur(+p.total)}</span>`:""}</div>
         <p class="note" style="margin:0">${list}</p>${p.source?`<p class="note" style="margin:6px 0 0">${esc(p.source)}</p>`:""}
+        ${moved.length ? `<div class="moved">${moved.map(([k,m]) =>
+            `<div><span>${esc(name(k))}</span><b class="num ${m.was!=null && m.now>m.was?"neg":"pos"}">${
+              m.was==null ? "цена появилась · "+eur(m.now)
+                          : eur(m.was)+" → "+eur(m.now)+" · "+(m.now>m.was?"+":"−")+eur(Math.abs(m.now-m.was))}</b></div>`
+          ).join("")}</div>` : ""}
+        ${p.receipt ? `<button class="lnk rcpt" data-rcpt="${esc(p.id)}">посмотреть чек</button>` : ""}
         <div style="text-align:right;margin-top:6px">${p.by?`<span class="note">${esc(p.by)}</span>`:""} <button class="del ${S.armed==="purchases/"+p.id?"armed":""}" data-del="purchases/${esc(p.id)}">${S.armed==="purchases/"+p.id?"точно удалить?":"удалить"}</button></div></div>`;
     } else {
       h += `<div class="panel pad"><div class="h"><b>Опорный подсчёт ${ddmm(e.c.date)}</b></div>
@@ -620,6 +642,18 @@ document.addEventListener("click", async e => {
   if(s && !s.closest(".sheet-bg")){ const inp = s.parentElement.querySelector("input"), v = Math.max(0,(parseInt(inp.value)||0) + (+s.dataset.d)); inp.value = v; setVal(inp.dataset.k, s.dataset.id, v); haptic("light"); return }
   if(e.target.closest("#fillNeed")){ for(const p of sorted()){ const n = S.M.items[p.id]?.need; if(n) S.buy[p.id] = n } render(); toast("Список перенесён — поправь по чеку"); return }
   const rf = e.target.closest("#refresh");
+  if(e.target.id === "manualToggle"){ S.f.manual = !S.f.manual; render(); return }
+  const rc = e.target.closest?.("[data-rcpt]");
+  if(rc){
+    const id = rc.dataset.rcpt, was = rc.textContent;
+    rc.textContent = "загружаю…"; rc.disabled = true;
+    try{
+      const f = await API.receipt(id);
+      showReceipt(`data:${f.mime};base64,${f.data}`);
+    }catch(err){ toast("Не вышло: "+err.message) }
+    rc.textContent = was; rc.disabled = false;
+    return;
+  }
   if(rf){ rf.classList.add("spin"); try{ await apply(API.list(true)); toast("Обновлено") }catch(err){ toast("Не вышло: "+err.message) } rf.classList.remove("spin"); return }
   const d = e.target.closest("[data-del]");
   if(d){ if(S.armed !== d.dataset.del){ S.armed = d.dataset.del; render(); return }
@@ -647,6 +681,40 @@ function setVal(k,id,v){
   const el = document.getElementById(k+"-"+id);
   if(el) el.classList.toggle("changed", k === "b" ? v > 0 : v !== Math.round(S.M.items[id].exact));
 }
+/* Фото с телефона весит мегабайты, а в строку закупки должен уехать разумный кадр:
+   ужимаем до 1600 px по длинной стороне. Чек после этого читается, а запрос не пухнет. */
+function shrink(file, max = 1600, q = 0.72){
+  return new Promise((ok, no) => {
+    const fr = new FileReader();
+    fr.onerror = () => no(new Error("Не получилось прочитать файл"));
+    fr.onload = () => {
+      const im = new Image();
+      im.onerror = () => no(new Error("Это не похоже на картинку"));
+      im.onload = () => {
+        const k = Math.min(1, max/Math.max(im.width, im.height));
+        const c = document.createElement("canvas");
+        c.width = Math.round(im.width*k); c.height = Math.round(im.height*k);
+        c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+        ok(c.toDataURL("image/jpeg", q));
+      };
+      im.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
+addEventListener("change", async e => {
+  if(e.target.id !== "rcpt") return;
+  const f = e.target.files?.[0]; if(!f) return;
+  if(!/^image\//.test(f.type)) return toast("Нужна фотография чека");
+  try{
+    S.f.photo = await shrink(f);
+    toast("Чек прикреплён");
+    haptic("light");
+    render();
+  }catch(err){ toast("Не вышло: "+err.message) }
+});
+
 async function saveBuy(){
   const items = {}; for(const [k,v] of Object.entries(S.buy)) if(v > 0) items[k] = v;
   if(!Object.keys(items).length) return;
@@ -657,8 +725,8 @@ async function saveBuy(){
   if(!who){ toast("Впиши, кто закупал"); $("#buyWho")?.focus(); return }
   const b = $("#dockBtn"); b.disabled = true;
   try{
-    await apply(API.addPurchase({date:new Date().toISOString(), items, total, by:who}));
-    S.buy = {}; S.f.buySum = ""; toast("Закупка добавлена на склад"); haptic("medium");
+    await apply(API.addPurchase({date:new Date().toISOString(), items, total, by:who, photo:S.f.photo||null}));
+    S.buy = {}; S.f.buySum = ""; S.f.photo = null; toast("Закупка добавлена на склад"); haptic("medium");
     S.tab = "menu"; document.querySelectorAll(".tab").forEach(x => x.setAttribute("aria-selected", x.dataset.tab === "menu")); render(); scrollTo(0,0);
   }catch(e){ toast("Не сохранилось: "+e.message); b.disabled = false }
 }
@@ -712,6 +780,16 @@ async function addProduct(){
 /* Отладочный доступ к модели: включается только адресом с ?debug=1.
    Нужен для сверки цифр приложения против эталонного пересчёта. */
 if(location.search.includes("debug=1")) window.__hub = {S, model, get M(){ return S.M }};
+
+function showReceipt(src){
+  const bg = document.createElement("div");
+  bg.className = "sheetbg photo";
+  bg.innerHTML = `<div class="photowrap"><img src="${src}" alt="Чек"><button class="btn ghost" id="pClose">Закрыть</button></div>`;
+  document.body.appendChild(bg);
+  const close = () => { bg.remove(); TG?.BackButton?.offClick(close); TG?.BackButton?.hide() };
+  bg.addEventListener("click", ev => { if(ev.target === bg || ev.target.id === "pClose") close() });
+  TG?.BackButton?.show(); TG?.BackButton?.onClick(close);
+}
 
 /* ---------- старт ---------- */
 (async () => {
