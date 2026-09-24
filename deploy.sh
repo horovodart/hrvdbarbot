@@ -52,8 +52,15 @@ else
 fi
 
 # 6. Живой API должен ответить — деплой без проверки не считается сделанным.
+# Apps Script изредка отдаёт пустоту или HTML-заглушку вместо ответа — одного
+# выстрела мало, иначе деплой ругается на ровном месте.
 sleep 3
-RESP="$(curl -s -L --max-time 30 "$API")"
+RESP=""
+for i in 1 2 3 4; do
+  RESP="$(curl -s -L --max-time 30 "$API")"
+  echo "$RESP" | grep -q '"alive":true' && break
+  sleep $((i * 3))
+done
 echo "$RESP" | grep -q '"alive":true' || die "API не отвечает как надо: ${RESP:0:200}"
 echo "API живой: ${RESP:0:80}"
 echo
