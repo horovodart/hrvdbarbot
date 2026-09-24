@@ -136,6 +136,19 @@ function model(){
 
     items[p.id] = {est, exact, estimated, rate, daysLeft, st, need, restock, periods, bought:since[p.id]||0, base};
   }
+  // История цен по товару: цена зависит от магазина, и скачок 0,47 → 0,65 должен
+  // объясняться сам — где купили и каким был разброс.
+  for(const p of S.products){
+    const h = [];
+    for(const x of purch){
+      const pr = x.prices && typeof x.prices === "object" ? x.prices.list : null;
+      const v = pr && pr[p.id];
+      if(v > 0) h.push({date:x.date, price:+v, source:x.source || null});
+    }
+    h.sort((a,b) => a.date < b.date ? -1 : 1);
+    items[p.id].prices = h;
+  }
+
   // сдача тары: сколько всего сдали и сколько залога ещё лежит в пустой таре
   const tare = S.returns.reduce((o,r) => ({units:o.units+(+r.units||0), amount:o.amount+(+r.amount||0)}),
                                 {units:0, amount:0});
@@ -322,7 +335,9 @@ function renderBuy(M){
   <button class="btn ghost" id="tareBtn" style="margin-top:12px">Сдал тару · накопилось ${M.tare.unitsWaiting} шт ~${eur(M.tare.waiting)}</button>
   <div class="fields" style="margin-top:12px">
     <div class="field"><label for="buySum">Сумма чека, €</label><input id="buySum" value="${esc(S.f.buySum||"")}" inputmode="decimal" placeholder="например 97,48"></div>
-    <div class="field"><label for="buyWho">Кто купил</label><input id="buyWho" value="${esc(S.f.buyWho||"")}" placeholder="имя"></div></div>
+    <div class="field"><label for="buyWho">Кто купил</label><input id="buyWho" value="${esc(S.f.buyWho||"")}" placeholder="имя"></div>
+    <div class="field" style="min-width:100%"><label for="buyWhere">Где купили</label><input id="buyWhere" value="${esc(S.f.buyWhere||"")}" placeholder="Metro, Lidl, Kaufland…" list="shops">
+      <datalist id="shops">${[...new Set(M.purch.map(x => x.source).filter(Boolean))].map(x => `<option value="${esc(x)}">`).join("")}</datalist></div></div>
   </div>
   <details class="panel pad" style="margin-top:16px"><summary style="cursor:pointer;font-weight:600">+ Новый напиток</summary><div class="stack" style="margin-top:14px">
     <div class="fields"><div class="field"><label for="npName">Название</label><input id="npName" placeholder="Birell 0,0%"></div><div class="field"><label for="npVol">Объём</label><input id="npVol" placeholder="0,5 л, стекло"></div></div>
@@ -426,6 +441,8 @@ function sheet(p){
   const it = S.M.items[p.id];
   const dep  = +p.dep || 0;
   const marg = p.cat==="sale" && p.cost != null ? SALE - p.cost : null;
+  const ph = it.prices || [];
+  const lastBuy = ph[ph.length - 1];
   const buyLine = p.cost == null ? "цена закупки не заполнена"
     : `закупка ${eur(p.cost)} с НДС` + (dep ? ` · в магазине ${eur(p.cost+dep)} с залогом` : "") + (marg != null ? ` · маржа +${eur(marg)}` : "");
   const n = Math.round(it.exact);
@@ -461,10 +478,20 @@ function sheet(p){
         ${kv("Остаток"+(S.M.last?" на "+ddmm(S.M.last.date):""), n+" шт", it.st!=="green"?it.st:"")}
         ${it.estimated ? kv("Сейчас, по расчёту", "≈ "+Math.round(it.est)+" шт · прогноз", "dim") : ""}
         ${kv("Хватит на", it.daysLeft!=null ? (it.daysLeft>60?"больше 60 дн.":it.daysLeft<1?"меньше дня":Math.floor(it.daysLeft)+" "+plural(Math.floor(it.daysLeft),"день","дня","дней"))+" · прогноз" : "нет данных", it.daysLeft==null?"dim":(it.st!=="green"?it.st:""))}
+        ${lastBuy ? kv("Цена из чека", eur(lastBuy.price) + (lastBuy.source ? " · "+esc(lastBuy.source) : "") + " · " + ddmm(lastBuy.date)) : ""}
         ${kv("Средний расход", it.rate != null ? dec(it.rate*7)+" в нед." : "нет данных", it.rate!=null?"":"dim")}
         ${kv("Купить на "+TARGET+" дн.", it.need ? "+"+it.need+" шт" : "не нужно", it.need?"":"dim")}
       </div>
       <div class="blk"><h4>Среднее использование</h4>${use}</div>
+      ${ph.length > 1 ? `<div class="blk"><h4>Почём брали</h4>
+        <div class="moved">${ph.slice(-6).reverse().map(x =>
+          `<div><span>${ddmm(x.date)}${x.source ? " · "+esc(x.source) : ""}</span><b class="num">${eur(x.price)}</b></div>`
+        ).join("")}</div>
+        ${(() => { const v = ph.map(x => x.price), lo = Math.min(...v), hi = Math.max(...v);
+          return hi - lo >= 0.005
+            ? `<p class="note" style="margin:8px 0 0">Разброс ${eur(lo)} — ${eur(hi)}: цена зависит от магазина. Считаем по последней.</p>`
+            : ""; })()}
+      </div>` : ""}
       ${p.note ? `<div class="blk"><h4>Закупка</h4><p class="note" style="margin:0">${esc(p.note)}</p></div>` : ""}
       <div class="blk"><h4>Поправить</h4>
         <div class="fields"><div class="field"><label for="edCost">Закупка за шт, € с НДС</label><input id="edCost" inputmode="decimal" value="${p.cost ?? ""}"></div>
@@ -670,7 +697,7 @@ document.addEventListener("input", e => {
     if(String(v) !== i.value.trim() && i.value.trim() !== "") i.value = v;   // не даём полю врать
     setVal(i.dataset.k, i.dataset.id, v);
   }
-  if(["buySum","buyWho","cCash","cCard","cWho"].includes(i.id)) S.f[i.id] = i.value;
+  if(["buySum","buyWho","buyWhere","cCash","cCard","cWho"].includes(i.id)) S.f[i.id] = i.value;
   if(i.id === "cAmnesty") S.f.amnesty = i.checked;
   if(i.id === "cCash" || i.id === "cCard") previewCount(S.M);
 });
@@ -728,7 +755,8 @@ async function saveBuy(){
   if(!who){ toast("Впиши, кто закупал"); $("#buyWho")?.focus(); return }
   const b = $("#dockBtn"); b.disabled = true;
   try{
-    await apply(API.addPurchase({date:new Date().toISOString(), items, total, by:who, photo:S.f.photo||null}));
+    await apply(API.addPurchase({date:new Date().toISOString(), items, total, by:who,
+                                 source:$("#buyWhere")?.value.trim() || null, photo:S.f.photo||null}));
     S.buy = {}; S.f.buySum = ""; S.f.photo = null; toast("Закупка добавлена на склад"); haptic("medium");
     S.tab = "menu"; document.querySelectorAll(".tab").forEach(x => x.setAttribute("aria-selected", x.dataset.tab === "menu")); render(); scrollTo(0,0);
   }catch(e){ toast("Не сохранилось: "+e.message); b.disabled = false }

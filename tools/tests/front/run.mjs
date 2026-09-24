@@ -507,6 +507,38 @@ console.log("\n— 9. сверка с tools/reference.py (hub-bar-data.json) —
 }
 
 /* ------------------------------------------------------------------ */
+console.log("\n— 12. история цен: где и почём брали —");
+{
+  // Цена зависит от магазина: в Metro одно, в Lidl другое. Правило «считаем по
+  // последней» это выдерживает, но скачок должен объясняться — откуда цифра.
+  const data = {
+    products: [{id:"h", cat:"sale", cost:0.65, pack:24}],
+    counts: [{id:"c1", date:"2026-01-01T00:00:00.000Z", stock:{h:10}}],
+    purchases: [
+      {id:"b1", date:"2026-01-05T00:00:00.000Z", source:"Metro",     items:{h:24}, prices:{list:{h:0.47}}},
+      {id:"b3", date:"2026-03-01T00:00:00.000Z", source:"Metro",     items:{h:24}, prices:{list:{h:0.65}}},
+      {id:"b2", date:"2026-02-01T00:00:00.000Z", source:"Kaufland",  items:{h:24}, prices:{list:{h:0.59}}},
+      {id:"b4", date:"2026-04-01T00:00:00.000Z", items:{h:24}},                    // без цен
+      {id:"b5", date:"2026-05-01T00:00:00.000Z", items:{h:24}, prices:{list:{h:0}}} // мусорная цена
+    ]
+  };
+  const it = compute(data, {now:"2026-06-01T00:00:00.000Z"}).M.items.h;
+  eq("12.1 в историю попали только закупки с ценой", it.prices.length, 3);
+  eq("12.2 история отсортирована по дате", it.prices.map(x => x.price), [0.47, 0.59, 0.65]);
+  eq("12.3 магазин сохранён", it.prices.map(x => x.source), ["Metro", "Kaufland", "Metro"]);
+  eq("12.4 последняя цена — самая свежая, а не самая большая", it.prices[it.prices.length-1].price, 0.65);
+  ok("12.5 нулевая цена не попала в историю", !it.prices.some(x => !x.price));
+}
+{
+  const data = {
+    products: [{id:"h", cat:"sale", cost:1, pack:6}],
+    counts: [{id:"c1", date:"2026-01-01T00:00:00.000Z", stock:{h:10}}],
+    purchases: [{id:"b1", date:"2026-01-05T00:00:00.000Z", items:{h:6}}]
+  };
+  const it = compute(data, {now:"2026-02-01T00:00:00.000Z"}).M.items.h;
+  eq("12.6 без цен в закупках история пустая, но не падает", it.prices.length, 0);
+}
+
 console.log("\n— 11. минимум — жёсткий пол —");
 {
   // Правило Миши про воду: держаться на 12 штуках минимум, 24 в идеале.
