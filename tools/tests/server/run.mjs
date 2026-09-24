@@ -126,7 +126,8 @@ test('новая версия — дубли по id схлопываются в
   assert.equal(rowsWithId(d, 'aro05').length, 1, 'строк с id aro05 после синка');
   const o = objs(d);
   assert.equal(o.aro05.name, api.SEED.products.aro05.name, 'имя перезаписано из SEED');
-  assert.equal(o.aro05.cost, api.SEED.products.aro05.cost, 'цена перезаписана из SEED');
+  // имя и категорию сид поправляет, а цену — нет: она приходит из чеков
+  assert.equal(o.aro05.cost, 9, 'цена из листа сохранена, а не откачена к сидовой');
   assert.ok(o.my_own, 'чужой товар, заведённый в приложении, не удалён');
   assert.equal(o.my_own.name, 'товар из приложения');
   assert.equal(Object.keys(o).length, Object.keys(api.SEED.products).length + 1,
@@ -151,6 +152,23 @@ test('хвост подчищается: лишние строки очищен�
   assert.equal(env.sheet('products').getLastRow(), ids.length + 1, 'getLastRow после подчистки хвоста');
 });
 
+test('цена из чека не откатывается синком, у новой строки берётся из SEED', () => {
+  // Сид знает только стартовую цену. Если синк её перезапишет, подъём версии
+  // молча откатит всё, что принесли чеки, — и недобор посчитается по старым деньгам.
+  const h = ['id','name','vol','cat','shape','color','cap','cost','dep','pack','min','order','note','hidden','phaseout'];
+  const SEED = newApp({}).api.SEED.products;
+  const seeded = SEED.aro05.cost;
+  // берём новый товар, у которого в сиде цена есть — иначе проверять нечего
+  const fresh = Object.keys(SEED).find(k => k !== 'aro05' && typeof SEED[k].cost === 'number');
+  const products = [h, mkRow(h, { id: 'aro05', name: 'x', cost: 9.99 })];
+  const { env, api } = newApp({ sheets: { products }, props: { SEED_VERSION: '1' } });
+  api.syncProducts();
+  const o = objs(env.dump('products'));
+  assert.equal(o.aro05.cost, 9.99, 'цена, принесённая чеком, осталась');
+  assert.equal(o[fresh].cost, SEED[fresh].cost, 'у новой строки цена из SEED (' + fresh + ')');
+  assert.notEqual(9.99, seeded, 'подготовка: в SEED цена другая, иначе тест ничего не проверяет');
+});
+
 test('phaseout существующей строки не перезаписывается, у новой ставится из SEED', () => {
   const h = ['id', 'name', 'vol', 'cat', 'shape', 'color', 'cap', 'cost', 'dep', 'pack', 'min', 'order', 'note', 'hidden', 'phaseout'];
   const app0 = newApp({}).api;
@@ -169,7 +187,7 @@ test('phaseout существующей строки не перезаписыв
   assert.equal(o.aro05.phaseout, true, 'включённый в приложении phaseout синк не сбросил');
   assert.equal(o.chivas12.phaseout, false, 'выключенный в приложении phaseout синк не поднял');
   assert.equal(o.dimple.phaseout, true, 'у новой строки phaseout взят из SEED');
-  assert.equal(o.aro05.cost, api.SEED.products.aro05.cost, 'остальные поля всё же обновились');
+  assert.equal(o.aro05.vol, api.SEED.products.aro05.vol, 'остальные поля всё же обновились');
 });
 
 test('чужой порядок колонок и посторонняя колонка', () => {
@@ -183,7 +201,7 @@ test('чужой порядок колонок и посторонняя кол�
   assert.deepEqual(head(d), h, 'шапку не переставили и лишних колонок не добавили');
   const o = objs(d);
   assert.equal(o.aro05.name, api.SEED.products.aro05.name, 'name лёг в свою колонку');
-  assert.equal(o.aro05.cost, api.SEED.products.aro05.cost, 'cost лёг в свою колонку');
+  assert.equal(o.aro05.cost, 99, 'cost остался тем, что в листе: его приносят чеки, а не сид');
   assert.equal(o.aro05.vol, api.SEED.products.aro05.vol, 'vol лёг в свою колонку');
   assert.equal(o.aro05.comment, 'мой коммент', 'посторонняя колонка не затёрта');
   assert.equal(o.aro05.phaseout, true, 'phaseout сохранён');

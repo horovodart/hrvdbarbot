@@ -1,6 +1,6 @@
 /* Справочник товаров, команда и стартовые данные. */
 
-var SEED_VERSION = 16;
+var SEED_VERSION = 17;
 
 var SEED_RETIRE = {
   "returns": ["r-2026-08-15", "r-2026-07-21"]   // августовские 17,25 € вошли в эту запись, отдельной строкой не нужны
@@ -254,7 +254,7 @@ var SEED = {
     "chips_sk": {
       "cat": "snack",
       "color": "#C0392B",
-      "cost": null,
+      "cost": 1.23,
       "dep": 0.0,
       "min": 2,
       "name": "Чипсы Slovakia",
@@ -281,7 +281,7 @@ var SEED = {
     "chrumky": {
       "cat": "snack",
       "color": "#F0C24B",
-      "cost": null,
+      "cost": 0.47,
       "dep": 0.0,
       "min": 2,
       "name": "Chrumky",
@@ -349,7 +349,7 @@ var SEED = {
     "cola033": {
       "cat": "sale",
       "color": "#D71920",
-      "cost": 0.73,
+      "cost": 0.89,
       "dep": 0.15,
       "min": 6,
       "name": "Coca-Cola / Zero",
@@ -419,7 +419,7 @@ var SEED = {
     "hell250": {
       "cat": "sale",
       "color": "#1E1E24",
-      "cost": 0.47,
+      "cost": 0.65,
       "dep": 0.15,
       "min": 6,
       "name": "Hell Energy",
@@ -566,7 +566,7 @@ var SEED = {
     "pelle033": {
       "cat": "sale",
       "color": "#E8552D",
-      "cost": 1.13,
+      "cost": 0.99,
       "dep": 0.15,
       "min": 6,
       "name": "San Pellegrino",
@@ -619,7 +619,7 @@ var SEED = {
     "redbull250": {
       "cat": "sale",
       "color": "#1B3A6B",
-      "cost": null,
+      "cost": 1.29,
       "dep": 0.15,
       "min": 6,
       "name": "Red Bull",
@@ -886,7 +886,7 @@ var SEED = {
     "zbtmave": {
       "cat": "sale",
       "color": "#5C3317",
-      "cost": 0.97,
+      "cost": 1.26,
       "dep": 0.15,
       "min": 6,
       "name": "Zlatý Bažant tmavé",

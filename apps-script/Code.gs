@@ -430,8 +430,11 @@ function syncProducts(){
     var row = at == null ? head.map(function(){ return '' }) : grid[at];
     head.forEach(function(h,i){
       if (h === 'id') { row[i] = id; return }
-      // «распродаём» — решение команды, принятое в приложении: синком не сбрасываем
-      if (h === 'phaseout' && at != null) return;
+      // Решения и факты, заведённые в приложении, синком не трогаем:
+      //   phaseout — решение команды «больше не докупаем»;
+      //   cost     — цена из последнего чека. Сид знает только стартовую цену,
+      //              и подъём версии откатывал бы всё, что принесли чеки.
+      if (at != null && (h === 'phaseout' || h === 'cost')) return;
       if (h in o) row[i] = cell('products', h, o[h]);
     });
     if (at == null){ idx[id] = grid.length; grid.push(row) }
