@@ -138,6 +138,9 @@ function handle(action, p, user){
   lock.waitLock(30000);
   try {
     var who = user ? user.name : null;
+    var rid = p && p.rid ? String(p.rid).slice(0, 64) : null;
+    // тот же запрос уже отработал — отдаём склад, но второй строки не заводим
+    if (rid && ridSeen(rid)) return listCached(false);
     if (action === 'addPurchase'){
       ensureCols('purchases');                 // без этого receipt и prices молча пропадают
       var pid = uid('p');
@@ -184,6 +187,7 @@ function handle(action, p, user){
       if (!buy) throw new Error('Закупка не найдена');
       return readReceipt(buy.receipt);
     } else throw new Error('Неизвестное действие: ' + action);
+    ridRemember(rid);
     dropListCache();
     return listCached(true);
   } finally { lock.releaseLock() }
@@ -213,6 +217,23 @@ function listCached(fresh){
 }
 
 function dropListCache(){ try { CacheService.getScriptCache().remove(LIST_KEY) } catch (e) {} }
+
+/* Защита от дубля при повторе запроса.
+
+   Приложение повторяет запрос, если ответ пришёл битым — а это случается: Apps
+   Script изредка отдаёт HTML-заглушку вместо данных. Но скрипт-то мог уже всё
+   записать, и повтор завёл бы вторую такую же закупку. Поэтому каждое сохранение
+   несёт свой номер, и второй раз с тем же номером мы ничего не пишем. */
+var RID_TTL = 21600;   // 6 часов: дольше одной попытки сохранить не длится
+
+function ridSeen(rid){
+  if (!rid) return false;
+  try { return !!CacheService.getScriptCache().get('rid:' + rid) } catch (e) { return false }
+}
+function ridRemember(rid){
+  if (!rid) return;
+  try { CacheService.getScriptCache().put('rid:' + rid, '1', RID_TTL) } catch (e) {}
+}
 
 /* Фото чека храним в Telegram, а не на Диске.
 

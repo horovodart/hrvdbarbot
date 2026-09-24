@@ -38,8 +38,14 @@ window.API = (function(){
     return j.data;
   }
 
+  // Номер попытки сохранить. Генерируем ОДИН раз на действие человека, а не на
+  // каждый повтор: иначе защита от дубля на сервере потеряет смысл.
+  const WRITES = ["addPurchase","addCount","addReturn","addProduct","updateProduct","delete"];
+  const rid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+
   async function post(action, payload){
     if(!live()) return demo(action, payload);
+    if(WRITES.includes(action)) payload = Object.assign({rid: rid()}, payload || {});
     let last;
     for(let i = 0; i < 4; i++){
       try { return await once(action, payload) }

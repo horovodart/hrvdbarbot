@@ -750,13 +750,16 @@ async function saveBuy(){
   if(!Object.keys(items).length) return;
   // Без суммы и без имени закупка бесполезна: по ней не пересчитать цену за штуку
   // и не спросить, если что-то не сходится.
-  const total = num($("#buySum")?.value), who = $("#buyWho")?.value.trim();
+  const total = num($("#buySum")?.value), who = $("#buyWho")?.value.trim(),
+        where = $("#buyWhere")?.value.trim();
   if(!(total > 0)){ toast("Впиши сумму чека"); $("#buySum")?.focus(); return }
   if(!who){ toast("Впиши, кто закупал"); $("#buyWho")?.focus(); return }
+  // без магазина цена за штуку повисает в воздухе: в Metro одна, в Kaufland другая
+  if(!where){ toast("Впиши, где купили"); $("#buyWhere")?.focus(); return }
   const b = $("#dockBtn"); b.disabled = true;
   try{
     await apply(API.addPurchase({date:new Date().toISOString(), items, total, by:who,
-                                 source:$("#buyWhere")?.value.trim() || null, photo:S.f.photo||null}));
+                                 source:where, photo:S.f.photo||null}));
     S.buy = {}; S.f.buySum = ""; S.f.photo = null; toast("Закупка добавлена на склад"); haptic("medium");
     S.tab = "menu"; document.querySelectorAll(".tab").forEach(x => x.setAttribute("aria-selected", x.dataset.tab === "menu")); render(); scrollTo(0,0);
   }catch(e){ toast("Не сохранилось: "+e.message); b.disabled = false }

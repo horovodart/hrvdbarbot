@@ -828,6 +828,63 @@ test('fresh:true обходит кэш и перечитывает лист', ()
   assert.ok(env.stats.total > 0, 'кнопка «обновить» обязана идти в таблицу, а не в кэш');
 });
 
+G('12. повтор запроса не заводит дубль');
+
+test('повтор с тем же номером не пишет вторую закупку', () => {
+  // Приложение повторяет запрос, когда ответ пришёл битым, — а скрипт мог уже
+  // всё записать. Без защиты в таблице появлялась вторая такая же закупка.
+  const { api } = readyApp();
+  const before = Object.keys(api.handle('list', {}, { id:'1', name:'Миша' }).purchases).length;
+  const pay = { rid: 'один-и-тот-же', date:'2026-10-05T10:00:00.000Z', total: 33, items:{aro05:6} };
+  api.handle('addPurchase', pay, { id:'1', name:'Миша' });
+  const out = api.handle('addPurchase', pay, { id:'1', name:'Миша' });
+  assert.equal(Object.keys(out.purchases).length, before + 1, 'закупка ровно одна');
+  assert.equal(Object.values(out.purchases).filter(x => x.total === 33).length, 1, 'дубля нет');
+});
+
+test('разные номера — разные записи, даже если всё остальное совпало', () => {
+  const { api } = readyApp();
+  const base = { date:'2026-10-05T10:00:00.000Z', total: 34, items:{aro05:6} };
+  api.handle('addPurchase', Object.assign({ rid:'первый' }, base), { id:'1', name:'Миша' });
+  const out = api.handle('addPurchase', Object.assign({ rid:'второй' }, base), { id:'1', name:'Миша' });
+  assert.equal(Object.values(out.purchases).filter(x => x.total === 34).length, 2,
+    'две одинаковые закупки подряд — это нормально, если человек так и сделал');
+});
+
+test('без номера работает как раньше', () => {
+  const { api } = readyApp();
+  api.handle('addPurchase', { total: 35, items:{aro05:1} }, { id:'1', name:'Миша' });
+  const out = api.handle('addPurchase', { total: 35, items:{aro05:1} }, { id:'1', name:'Миша' });
+  assert.equal(Object.values(out.purchases).filter(x => x.total === 35).length, 2);
+});
+
+test('повтор подсчёта тоже не двоится', () => {
+  const { api } = readyApp();
+  const before = Object.keys(api.handle('list', {}, { id:'1', name:'Миша' }).counts).length;
+  const pay = { rid:'подсчёт-1', date:'2026-10-06T10:00:00.000Z', cash: 50, card: 0, stock:{aro05:5} };
+  api.handle('addCount', pay, { id:'1', name:'Миша' });
+  const out = api.handle('addCount', pay, { id:'1', name:'Миша' });
+  assert.equal(Object.keys(out.counts).length, before + 1, 'подсчёт ровно один');
+});
+
+test('повтор сдачи тары тоже не двоится', () => {
+  const { api } = readyApp();
+  const before = Object.keys(api.handle('list', {}, { id:'1', name:'Миша' }).returns).length;
+  const pay = { rid:'тара-1', date:'2026-10-06T10:00:00.000Z', amount: 12.15, units: 81, toTill:true };
+  api.handle('addReturn', pay, { id:'1', name:'Миша' });
+  const out = api.handle('addReturn', pay, { id:'1', name:'Миша' });
+  assert.equal(Object.keys(out.returns).length, before + 1, 'сдача ровно одна');
+});
+
+test('повтор возвращает актуальный склад, а не пустоту', () => {
+  const { api } = readyApp();
+  const pay = { rid:'ещё-один', total: 36, items:{aro05:2} };
+  api.handle('addPurchase', pay, { id:'1', name:'Миша' });
+  const out = api.handle('addPurchase', pay, { id:'1', name:'Миша' });
+  assert.equal(Object.keys(out.products).length, 51, 'на повторе тоже отдан весь склад');
+  assert.ok(out.counts && out.purchases && out.returns, 'и все разделы');
+});
+
 G('11. чек закупки');
 
 const PNG1 = 'data:image/jpeg;base64,' + Buffer.from('фото чека, как будто').toString('base64');
