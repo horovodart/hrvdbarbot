@@ -122,6 +122,7 @@ function allowed(id, user){
 
 function handle(action, p, user){
   var lock = LockService.getScriptLock();
+  if (action === 'parseReceipt') return parseReceipt(p.photo);   // чтение: замок не нужен
   if (action === 'list'){
     // Замок нужен, только если чтение может что-то записать: первый запуск или
     // разъехавшийся сид. Иначе двое открывших приложение одновременно вставали в
@@ -307,6 +308,141 @@ function readReceipt(id){
   var mime = byExt[ext] || blob.getContentType();
   if (!mime || mime.indexOf('image/') !== 0) mime = 'image/jpeg';
   return {mime: mime, data: Utilities.base64Encode(blob.getBytes()), name: name};
+}
+
+/* Разбор чека.
+
+   Модели отдаём фото и наш справочник и просим вернуть строго JSON: что куплено,
+   сколько штук и почём за штуку С НДС и БЕЗ ЗАЛОГА — залог в чеке идёт отдельными
+   строками и в нашу цену не входит. Сопоставление с товарами делает она же: по
+   названиям вроде «ZB 0,0% 500ml PLZ CI-BA-MAT» правилами не угадаешь.
+
+   Ничего не пишем: это чтение. Записывает addPurchase, после того как человек
+   подтвердил разбор. Модель ошибается, и молча верить ей нельзя. */
+var MODEL = 'claude-sonnet-5';
+
+function receiptPrompt(catalogue){
+  return [
+    'Разбери чек из магазина для складского учёта бара.',
+    'Ответ — СТРОГО JSON, без пояснений и без markdown:',
+    '{"shop":"магазин","date":"YYYY-MM-DD","total":итог чека,',
+    ' "lines":[{"name":"как напечатано","article":"номер товара или null",',
+    '  "qty":штук всего,"unit":цена за штуку с НДС,',
+    '  "match":"id из справочника или null","why":"почему так сопоставил"}]}',
+    '',
+    '── ЗАЛОГ. Самое важное.',
+    'Строки залога за тару — это НЕ товар, их в lines быть не должно вообще.',
+    'Узнаются так: цена ровно 0,15 за штуку; в названии PLZ 6x / 12x / 24x, PETZ,',
+    'obal, záloha; номер короткий (6 цифр) и часто помечен плюсом слева.',
+    'Название залоговой строки может повторять чужую марку (HEINEKEN PLZ 6x рядом',
+    'с Zlatý Bažant) — это всё равно залог, а не пиво Heineken. Просто пропусти.',
+    '',
+    '── КОЛИЧЕСТВО И ЦЕНА.',
+    'В чеке бывает две цены: без НДС и с НДС. Нам нужна ТОЛЬКО с НДС —',
+    'обычно это последняя денежная колонка строки (CELKOM S DPH).',
+    'Количество бывает как «штук в упаковке» × «сколько упаковок». Перемножь.',
+    'Пример строки Metro: «HELL 250ml PLZ | 0,530 | 24 | 12,72 | 3 | 38,16 | 46,95»',
+    'читается так: 0,530 — за штуку без НДС; 24 — штук в упаковке; 12,72 — упаковка',
+    'без НДС; 3 — упаковок; 38,16 — всего без НДС; 46,95 — всего С НДС.',
+    'Значит qty = 24 × 3 = 72, unit = 46,95 / 72 = 0,652.',
+    'unit = (итог строки с НДС) / qty. Никогда не бери цену без НДС.',
+    '',
+    '── СКИДКИ. Строки вида «KUP VIAC, PLAT MENEJ» с отрицательной суммой относятся',
+    'к позиции выше: вычти их из её итога с НДС перед делением.',
+    '',
+    '── СОПОСТАВЛЕНИЕ. match — только id из справочника, и только если уверен.',
+    'Разные вкусы одного товара — один id, если в справочнике он один.',
+    'Не уверен — ставь null, это нормально, человек поправит.',
+    '',
+    '── ПРОВЕРЬ СЕБЯ перед ответом:',
+    '1. Ни одной строки с unit ровно 0,15 в lines быть не должно — это залоги.',
+    '2. Сумма (qty × unit) по всем строкам плюс все залоги должна примерно сойтись',
+    '   с итогом чека. Не сходится — ищи, где взял не ту колонку, и пересчитай.',
+    '3. Если чек нечитаем или это не чек — верни {"error":"почему"}.',
+    '',
+    'Справочник (id — название — объём):',
+    catalogue
+  ].join('\n');
+}
+
+function parseReceipt(photo){
+  var key = prop('ANTHROPIC_KEY');
+  if (!key) throw new Error('Не задан ключ модели — разбор чека выключен');
+  var m = String(photo || '').match(/^data:(image\/[\w+.-]+);base64,(.+)$/);
+  if (!m) throw new Error('Фото чека в непонятном виде');
+
+  var all = rows('products');
+  var cat = all.filter(function(p){ return !p.hidden })
+    .map(function(p){ return p.id + ' — ' + p.name + (p.vol ? ' — ' + p.vol : '') })
+    .join('\n');
+
+  var r = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    headers: {'x-api-key': key, 'anthropic-version': '2023-06-01'},
+    payload: JSON.stringify({
+      model: MODEL, max_tokens: 4000,
+      // Рассуждение здесь только вредит: модель тратила на него весь запас и до
+      // ответа не доходила, а разбор занимал под три минуты. Задача механическая —
+      // прочитать таблицу и разложить по полям.
+      thinking: {type: 'disabled'},
+      messages: [{role: 'user', content: [
+        {type: 'image', source: {type: 'base64', media_type: m[1], data: m[2]}},
+        {type: 'text', text: receiptPrompt(cat)}
+      ]}]
+    })
+  });
+  if (r.getResponseCode() !== 200)
+    throw new Error('Модель ответила ' + r.getResponseCode() + ': ' + r.getContentText().slice(0, 200));
+
+  var out = JSON.parse(r.getContentText());
+  var text = (out.content || [])
+    .filter(function(c){ return c.type === 'text' })
+    .map(function(c){ return c.text || '' }).join('').trim();
+  if (!text) throw new Error('Модель не вернула ответ (stop_reason: ' + (out.stop_reason || '?') + ')');
+  // Модель любит написать пару фраз перед JSON — берём то, что между скобками
+  var i = text.indexOf('{'), j = text.lastIndexOf('}');
+  if (i >= 0 && j > i) text = text.slice(i, j + 1);    // отрезаем всё лишнее по краям
+  var data;
+  try { data = JSON.parse(text) }
+  catch (e) { throw new Error('Модель ответила не по схеме. Текст: [' + text.slice(0, 200) + '] Ответ: ' + JSON.stringify(out).slice(0, 400)) }
+  if (data.error) throw new Error(String(data.error));
+  if (!data.lines || !data.lines.length) throw new Error('Модель не нашла в чеке ни одной позиции');
+
+  // чистим: чужие id и мусорные числа до интерфейса не доходят
+  var known = {};
+  all.forEach(function(p){ known[p.id] = true });
+  // Залог модель иногда всё равно приносит как товар — отсекаем на сервере.
+  // Признак надёжный: ровно 0,15 за штуку и название вида «… PLZ 24x».
+  var DEPOSIT_NAME = /(PLZ|PETZ)\s*\d+\s*x|z[aá]loha|obal/i;
+  var isDeposit = function(l){
+    var u = Number(l.unit);
+    return isFinite(u) && Math.abs(u - 0.15) < 0.005 && DEPOSIT_NAME.test(String(l.name || ''));
+  };
+  data.skipped = (data.lines || []).filter(isDeposit).length;
+  data.lines = (data.lines || []).filter(function(l){ return l && l.name && !isDeposit(l) }).map(function(l){
+    var qty = Math.round(Number(l.qty) || 0), unit = Number(l.unit);
+    return {
+      name: String(l.name).slice(0, 80),
+      article: l.article ? String(l.article).slice(0, 40) : null,
+      qty: qty > 0 ? qty : 0,
+      unit: isFinite(unit) && unit > 0 ? Math.round(unit * 1000) / 1000 : null,
+      match: l.match && known[l.match] ? l.match : null,
+      why: l.why ? String(l.why).slice(0, 120) : ''
+    };
+  });
+  // Сверка: сумма позиций плюс залоги должна сойтись с итогом чека.
+  // Не сошлась — значит где-то взята не та колонка, и человеку стоит смотреть внимательно.
+  var sum = 0;
+  data.lines.forEach(function(l){ if (l.qty && l.unit) sum += l.qty * l.unit });
+  var total = Number(data.total);
+  data.check = {
+    sum: Math.round(sum * 100) / 100,
+    total: isFinite(total) ? total : null,
+    // залог в итог чека входит, в наши цены — нет, поэтому точного равенства не ждём
+    fits: isFinite(total) ? (total - sum) >= -0.5 && (total - sum) <= total * 0.45 : null
+  };
+  data.usage = out.usage || null;
+  return data;
 }
 
 function listAll(){
