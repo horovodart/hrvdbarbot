@@ -218,7 +218,7 @@ function stockLine(it){
   const n = Math.round(it.exact);
   if(n <= 0) return `<div class="stk red"><b class="num">0</b><span>нет</span></div>`;
   const t = it.daysLeft != null
-    ? (it.daysLeft > 60 ? "хватит надолго" : it.daysLeft < 1 ? "на исходе" : "хватит на "+Math.floor(it.daysLeft)+" дн.")
+    ? (it.daysLeft > 60 ? "надолго" : it.daysLeft < 1 ? "на исходе" : "на "+Math.floor(it.daysLeft)+" дн.")
     : plural(n,"штука","штуки","штук");
   return `<div class="stk ${it.st!=="green"?it.st:""}"><b class="num">${n}</b><span>${t}</span></div>`;
 }
