@@ -343,6 +343,7 @@ function readReceipt(id){
    Ничего не пишем: это чтение. Записывает addPurchase, после того как человек
    подтвердил разбор. Модель ошибается, и молча верить ей нельзя. */
 var MODEL = 'claude-sonnet-5';
+var DEPOSIT_UNIT = 0.15;   // залог за бутылку или банку
 
 function receiptPrompt(catalogue){
   return [
@@ -350,8 +351,11 @@ function receiptPrompt(catalogue){
     'Ответ — СТРОГО JSON, без пояснений и без markdown:',
     '{"shop":"магазин","date":"YYYY-MM-DD","total":итог чека,',
     ' "lines":[{"name":"как напечатано","article":"номер товара или null",',
-    '  "qty":штук всего,"unit":цена за штуку с НДС,',
+    '  "qty":штук всего,"sum":итог этой строки С НДС,',
+    '  "deposit":итог залоговой строки этого товара с НДС или null,',
     '  "match":"id из справочника или null","why":"почему так сопоставил"}]}',
+    '',
+    'Цену за штуку НЕ считай — её посчитаем мы. Дай qty, sum и deposit.',
     '',
     '── ЗАЛОГ. Самое важное.',
     'Строки залога за тару — это НЕ товар, их в lines быть не должно вообще.',
@@ -368,11 +372,14 @@ function receiptPrompt(catalogue){
     'читается так: 0,530 — за штуку без НДС; 24 — штук в упаковке; 12,72 — упаковка',
     'без НДС; 3 — упаковок; 38,16 — всего без НДС; 46,95 — всего С НДС.',
     'Значит qty = 24 × 3 = 72, unit = 46,95 / 72 = 0,652.',
-    'unit = (итог строки с НДС) / qty. Никогда не бери цену без НДС.',
-    'КОЛОНКА «СКОЛЬКО УПАКОВОК» — главный источник ошибок. Она почти всегда 1,',
-    'но иногда 3 или 4, и её легко пропустить. Проверяй её ОТДЕЛЬНО для каждой',
-    'строки. Сверься с залогом: если залог за строку 2,70 при 0,90 за упаковку —',
-    'значит упаковок три, и штук втрое больше, чем в одной упаковке.',
+    'sum — последняя денежная колонка строки (с НДС), не путай с колонкой без НДС.',
+    'КОЛОНКА «СКОЛЬКО УПАКОВОК» — главный источник ошибок: обычно 1, но бывает 3.',
+    'Проверяй её отдельно для каждой строки.',
+    '',
+    '── ЗАЛОГ КАК ПОДСКАЗКА. У каждой залоговой строки есть свой товар выше.',
+    'В поле deposit положи ИТОГ этой залоговой строки. По нему мы сами проверим',
+    'количество: залог 2,70 при 0,15 за штуку — значит товара 18 штук.',
+    'Если у товара залога нет (снеки, чай) — deposit: null.',
     '',
     '── СКИДКИ. Строки вида «KUP VIAC, PLAT MENEJ» с отрицательной суммой относятся',
     'к позиции выше: вычти их из её итога с НДС перед делением.',
@@ -451,25 +458,41 @@ function parseReceipt(photo){
   // Признак надёжный: ровно 0,15 за штуку и название вида «… PLZ 24x».
   var DEPOSIT_NAME = /(PLZ|PETZ)\s*\d+\s*x|z[aá]loha|obal/i;
   var isDeposit = function(l){
-    var u = Number(l.unit);
-    return isFinite(u) && Math.abs(u - 0.15) < 0.005 && DEPOSIT_NAME.test(String(l.name || ''));
+    // цену за штуку модель больше не присылает — считаем её сами из итога строки
+    var q = Number(l.qty), sm = Number(l.sum), u = Number(l.unit);
+    if (!isFinite(u) && isFinite(sm) && q > 0) u = sm / q;
+    return isFinite(u) && Math.abs(u - DEPOSIT_UNIT) < 0.005 && DEPOSIT_NAME.test(String(l.name || ''));
   };
   data.skipped = (data.lines || []).filter(isDeposit).length;
   data.lines = (data.lines || []).filter(function(l){ return l && l.name && !isDeposit(l) }).map(function(l){
-    var qty = Math.round(Number(l.qty) || 0), unit = Number(l.unit);
+    var qty = Math.round(Number(l.qty) || 0);
+    var sum = Number(l.sum), dep = Number(l.deposit);
+    var note = l.why ? String(l.why).slice(0, 120) : '';
+
+    // Количество по залогу — самая надёжная цифра в чеке: залог ровно 0,15 за штуку,
+    // и его итог модель читает точнее, чем колонку «сколько упаковок».
+    if (isFinite(dep) && dep > 0) {
+      var byDep = Math.round(dep / DEPOSIT_UNIT);
+      if (byDep > 0 && byDep !== qty) {
+        note = 'количество исправлено по залогу: ' + qty + ' → ' + byDep;
+        qty = byDep;
+      }
+    }
+    var unit = (isFinite(sum) && sum > 0 && qty > 0) ? Math.round(sum / qty * 1000) / 1000 : null;
     return {
       name: String(l.name).slice(0, 80),
       article: l.article ? String(l.article).slice(0, 40) : null,
       qty: qty > 0 ? qty : 0,
-      unit: isFinite(unit) && unit > 0 ? Math.round(unit * 1000) / 1000 : null,
+      sum: isFinite(sum) && sum > 0 ? Math.round(sum * 100) / 100 : null,
+      unit: unit,
       match: l.match && known[l.match] ? l.match : null,
-      why: l.why ? String(l.why).slice(0, 120) : ''
+      why: note
     };
   });
   // Сверка: сумма позиций плюс залоги должна сойтись с итогом чека.
   // Не сошлась — значит где-то взята не та колонка, и человеку стоит смотреть внимательно.
   var sum = 0;
-  data.lines.forEach(function(l){ if (l.qty && l.unit) sum += l.qty * l.unit });
+  data.lines.forEach(function(l){ if (l.sum) sum += l.sum; else if (l.qty && l.unit) sum += l.qty * l.unit });
   var total = Number(data.total);
   data.check = {
     sum: Math.round(sum * 100) / 100,

@@ -774,13 +774,16 @@ function prepParsed(d){
     const was = p && p.cost != null ? +p.cost : null;
     const jump = was != null && l.unit != null && was > 0
       ? Math.abs(l.unit - was) / was : 0;
-    const why = !l.match ? "не понял, что за товар"
+    // название вида «… PLZ 6x» — почти наверняка строка залога, а не товар
+    const looksDeposit = /(PLZ|PETZ)\s*\d+\s*x|z[aá]loha|obal/i.test(l.name || "");
+    const why = looksDeposit ? "похоже на строку залога, а не товар"
+              : !l.match ? "не понял, что за товар"
               : l.unit == null ? "не разобрал цену"
               : !l.qty ? "не разобрал количество"
               : jump > 0.25 ? `цена ушла на ${Math.round(jump*100)}% (было ${eur(was)})`
               : null;
     return {i, name:l.name, article:l.article||null, qty:l.qty||0, unit:l.unit,
-            id:l.match || "", was, doubt:why, use:true};
+            id:looksDeposit ? "" : (l.match || ""), was, doubt:why, use:!looksDeposit};
   });
   return {shop:d.shop||"", date:d.date||"", total:d.total ?? null,
           check:d.check||null, skipped:d.skipped||0, rows};
