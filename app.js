@@ -854,7 +854,9 @@ async function addProduct(){
 
 /* Отладочный доступ к модели: включается только адресом с ?debug=1.
    Нужен для сверки цифр приложения против эталонного пересчёта. */
-if(location.search.includes("debug=1")) window.__hub = {S, model, get M(){ return S.M }};
+// Отладочный ход: без него окна вроде подтверждения чека нечем проверить глазами
+if(location.search.includes("debug=1"))
+  window.__hub = {S, model, render, parseSheet, prepParsed, get M(){ return S.M }};
 
 /* Окно подтверждения разбора */
 function parseSheet(){
@@ -874,8 +876,8 @@ function parseSheet(){
 
   const bad = P.rows.filter(r => r.doubt), good = P.rows.filter(r => !r.doubt);
   const bg = document.createElement("div");
-  bg.className = "sheetbg";
-  bg.innerHTML = `<div class="sheet"><div class="grab"></div><div class="pad">
+  bg.className = "sheet-bg";
+  bg.innerHTML = `<div class="sheet"><div class="grab"><i></i></div><div class="body">
     <h3>Чек разобран</h3>
     <p class="note" style="margin:2px 0 12px">${esc(P.shop||"магазин не распознан")}${P.date?" · "+esc(P.date):""}${P.total!=null?" · итог "+eur(P.total):""}${P.skipped?` · пропущено залоговых строк: ${P.skipped}`:""}</p>
     ${P.check && P.check.fits === false ? `<p class="warn">Сумма позиций ${eur(P.check.sum)} не сходится с итогом чека ${eur(P.check.total)}. Проверь внимательно.</p>` : ""}
@@ -921,7 +923,7 @@ function parseSheet(){
 
 function showReceipt(src){
   const bg = document.createElement("div");
-  bg.className = "sheetbg photo";
+  bg.className = "sheet-bg photo";
   bg.innerHTML = `<div class="photowrap"><img src="${src}" alt="Чек"><button class="btn ghost" id="pClose">Закрыть</button></div>`;
   document.body.appendChild(bg);
   const close = () => { bg.remove(); TG?.BackButton?.offClick(close); TG?.BackButton?.hide() };

@@ -33,9 +33,12 @@ export function loadHub({ now = "2026-09-21T12:00:00.000Z", config = {} } = {}){
 
   // Внутренние однострочники (eur/dec/…) наружу не экспортируются — докидываем
   // экспорт строкой, чтобы тестировать ровно те же функции, что живут в замыкании.
-  const HOOK = `if(location.search.includes("debug=1")) window.__hub = {S, model, get M(){ return S.M }};`;
+  // Цепляемся за начало строки, а не за неё целиком: набор отлаживаемых функций
+  // в app.js меняется, и харнесс не должен падать от каждого добавления.
+  const HOOK = `window.__hub = {S, model`;
   if(!src.includes(HOOK)) throw new Error("не нашёл строку экспорта __hub в app.js — харнесс устарел");
-  const patched = src.replace(HOOK, HOOK + `\nwindow.__fn = {eur, dec, days, plural, num, isFree, esc};`);
+  const line = src.slice(src.indexOf(HOOK)).split("\n")[0];
+  const patched = src.replace(line, line + `\nwindow.__fn = {eur, dec, days, plural, num, isFree, esc};`);
 
   const FIXED = new Date(now).getTime();
   class FakeDate extends Date {
