@@ -198,7 +198,8 @@ test('чужой порядок колонок и посторонняя кол�
   const { env, api } = newApp({ sheets: { products }, props: { SEED_VERSION: '1' } });
   api.syncProducts();
   const d = env.dump('products');
-  assert.deepEqual(head(d), h, 'шапку не переставили и лишних колонок не добавили');
+  assert.deepEqual(head(d).slice(0, h.length), h, 'прежние колонки на месте и в том же порядке');
+  assert.ok(head(d).indexOf('aliases') >= h.length, 'недостающая колонка дописана в конец, а не воткнута в середину');
   const o = objs(d);
   assert.equal(o.aro05.name, api.SEED.products.aro05.name, 'name лёг в свою колонку');
   assert.equal(o.aro05.cost, 99, 'cost остался тем, что в листе: его приносят чеки, а не сид');
@@ -826,6 +827,59 @@ test('fresh:true обходит кэш и перечитывает лист', ()
   env.stats.reset();
   api.handle('list', { fresh: true }, { id: '1', name: 'Миша' });
   assert.ok(env.stats.total > 0, 'кнопка «обновить» обязана идти в таблицу, а не в кэш');
+});
+
+G('13. словарь названий из чеков');
+
+test('подтверждённое написание запоминается за товаром', () => {
+  const { api } = readyApp();
+  const out = api.handle('addPurchase', { total: 90, items:{aro05:6}, source:'Metro',
+    learn: [{id:'aro05', name:'ARO VODA 500ml PETZ NESYTENA', article:'8586000056916', shop:'Metro'}]
+  }, { id:'1', name:'Миша' });
+  const a = out.products.aro05.aliases;
+  assert.ok(a && a.length, 'словарь не пустой');
+  assert.equal(a[a.length-1].name, 'ARO VODA 500ml PETZ NESYTENA');
+  assert.equal(a[a.length-1].shop, 'Metro');
+  assert.equal(a[a.length-1].article, '8586000056916');
+});
+
+test('одно и то же написание не копится дублями', () => {
+  const { api } = readyApp();
+  const learn = [{id:'aro05', name:'ARO VODA 500ml', shop:'Metro'}];
+  api.handle('addPurchase', { total: 91, items:{aro05:1}, learn }, { id:'1', name:'Миша' });
+  const out = api.handle('addPurchase', { total: 92, items:{aro05:1}, learn }, { id:'1', name:'Миша' });
+  assert.equal(out.products.aro05.aliases.length, 1, 'запись одна, а не две');
+});
+
+test('разные магазины копятся отдельно', () => {
+  const { api } = readyApp();
+  api.handle('addPurchase', { total: 93, items:{aro05:1},
+    learn: [{id:'aro05', name:'ARO VODA', shop:'Metro'}] }, { id:'1', name:'Миша' });
+  const out = api.handle('addPurchase', { total: 94, items:{aro05:1},
+    learn: [{id:'aro05', name:'Voda Aro 0.5', shop:'Kaufland'}] }, { id:'1', name:'Миша' });
+  const shops = out.products.aro05.aliases.map(x => x.shop).sort();
+  assert.deepEqual(shops, ['Kaufland', 'Metro']);
+});
+
+test('словарь не растёт бесконечно', () => {
+  const { api } = readyApp();
+  for (let i = 0; i < 20; i++)
+    api.handle('addPurchase', { total: 95 + i, items:{aro05:1},
+      learn: [{id:'aro05', name:'вариант ' + i, shop:'Magazin' + i}] }, { id:'1', name:'Миша' });
+  const out = api.handle('list', {}, { id:'1', name:'Миша' });
+  assert.ok(out.products.aro05.aliases.length <= 12,
+    'помним последние написания, а не все подряд: ' + out.products.aro05.aliases.length);
+});
+
+test('мусор в словарь не попадает', () => {
+  const { api } = readyApp();
+  const out = api.handle('addPurchase', { total: 96, items:{aro05:1}, learn: [
+    {id:'нетакого', name:'что-то'},        // неизвестный товар
+    {id:'aro05'},                           // без названия
+    null
+  ]}, { id:'1', name:'Миша' });
+  const a = out.products.aro05.aliases;
+  assert.ok(!a || !a.length, 'ничего не записалось');
 });
 
 G('12. повтор запроса не заводит дубль');

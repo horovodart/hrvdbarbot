@@ -320,8 +320,10 @@ function renderBuy(M){
     </label>
     <input type="file" accept="image/*" capture="environment" id="rcpt" hidden>
     <p class="note" style="margin:10px 0 0">${C.RECOGNIZE
-      ? "Приложение само разберёт чек: что куплено, по какой цене за штуку, и обновит закупочные цены."
+      ? "Приложение разберёт чек: что куплено, по какой цене за штуку. Покажет разбор — подтвердишь."
       : "Разбор чека пока не подключён — фото сохранится к закупке, а количества отметь ниже."}</p>
+    ${S.f.parsing ? `<div class="parsing"><i></i>Читаю чек… это занимает полминуты</div>` : ""}
+    ${S.f.parsed && !S.f.parsing ? `<button class="lnk" id="parseAgain">показать разбор снова</button>` : ""}
   </div>
   <button class="lnk" id="manualToggle" aria-expanded="${C.RECOGNIZE && !S.f.manual ? "false" : "true"}">ввести вручную</button>
   <div id="manual"${C.RECOGNIZE && !S.f.manual ? " hidden" : ""}>
@@ -670,6 +672,7 @@ document.addEventListener("click", async e => {
   if(e.target.closest("#fillNeed")){ for(const p of sorted()){ const n = S.M.items[p.id]?.need; if(n) S.buy[p.id] = n } render(); toast("Список перенесён — поправь по чеку"); return }
   const rf = e.target.closest("#refresh");
   if(e.target.id === "manualToggle"){ S.f.manual = !S.f.manual; render(); return }
+  if(e.target.id === "parseAgain"){ parseSheet(); return }
   const rc = e.target.closest?.("[data-rcpt]");
   if(rc){
     const id = rc.dataset.rcpt, was = rc.textContent;
@@ -742,8 +745,46 @@ addEventListener("change", async e => {
     toast(`Чек прикреплён · ${kb >= 1024 ? (kb/1024).toFixed(1)+" МБ" : kb+" КБ"}`);
     haptic("light");
     render();
+    if(C.RECOGNIZE && API.live()) readReceipt();
   }catch(err){ toast("Не вышло: "+err.message) }
 });
+
+/* Разбор чека и подтверждение.
+   Модель ошибается, поэтому записываем только то, что человек увидел глазами.
+   Спорное показываем сразу, понятное прячем под строку — чтобы не листать
+   пятнадцать одинаковых строк и не терять бдительность на шестнадцатой. */
+async function readReceipt(){
+  S.f.parsing = true; render();
+  try{
+    const d = await API.parse(S.f.photo);
+    S.f.parsing = false;
+    S.f.parsed = prepParsed(d);
+    render();
+    parseSheet();
+  }catch(err){
+    S.f.parsing = false; render();
+    toast("Не разобрал: " + err.message);
+  }
+}
+
+// «спорной» считаем строку, где модель не уверена или цифра выглядит странно
+function prepParsed(d){
+  const rows = (d.lines || []).map((l, i) => {
+    const p = l.match ? S.products.find(x => x.id === l.match) : null;
+    const was = p && p.cost != null ? +p.cost : null;
+    const jump = was != null && l.unit != null && was > 0
+      ? Math.abs(l.unit - was) / was : 0;
+    const why = !l.match ? "не понял, что за товар"
+              : l.unit == null ? "не разобрал цену"
+              : !l.qty ? "не разобрал количество"
+              : jump > 0.25 ? `цена ушла на ${Math.round(jump*100)}% (было ${eur(was)})`
+              : null;
+    return {i, name:l.name, article:l.article||null, qty:l.qty||0, unit:l.unit,
+            id:l.match || "", was, doubt:why, use:true};
+  });
+  return {shop:d.shop||"", date:d.date||"", total:d.total ?? null,
+          check:d.check||null, skipped:d.skipped||0, rows};
+}
 
 async function saveBuy(){
   const items = {}; for(const [k,v] of Object.entries(S.buy)) if(v > 0) items[k] = v;
@@ -814,6 +855,69 @@ async function addProduct(){
 /* Отладочный доступ к модели: включается только адресом с ?debug=1.
    Нужен для сверки цифр приложения против эталонного пересчёта. */
 if(location.search.includes("debug=1")) window.__hub = {S, model, get M(){ return S.M }};
+
+/* Окно подтверждения разбора */
+function parseSheet(){
+  const P = S.f.parsed; if(!P) return;
+  const opts = id => `<option value=""${id?"":" selected"}>— не заводить —</option>` +
+    CATS.flatMap(c => S.products.filter(p => p.cat === c && !p.hidden)
+      .map(p => `<option value="${esc(p.id)}"${p.id===id?" selected":""}>${esc(p.name)}${p.vol?" · "+esc(p.vol):""}</option>`)).join("");
+
+  const row = r => `<div class="prow${r.doubt?" doubt":""}" data-i="${r.i}">
+    <div class="prow-h"><label class="chk"><input type="checkbox" class="pUse" ${r.use?"checked":""}><span>${esc(r.name)}</span></label></div>
+    ${r.doubt ? `<div class="prow-w">${esc(r.doubt)}</div>` : ""}
+    <div class="fields">
+      <div class="field" style="min-width:100%"><label>Товар</label><select class="pId">${opts(r.id)}</select></div>
+      <div class="field"><label>Штук</label><input class="pQty" inputmode="numeric" value="${r.qty||""}"></div>
+      <div class="field"><label>За штуку, €</label><input class="pUnit" inputmode="decimal" value="${r.unit ?? ""}"></div>
+    </div></div>`;
+
+  const bad = P.rows.filter(r => r.doubt), good = P.rows.filter(r => !r.doubt);
+  const bg = document.createElement("div");
+  bg.className = "sheetbg";
+  bg.innerHTML = `<div class="sheet"><div class="grab"></div><div class="pad">
+    <h3>Чек разобран</h3>
+    <p class="note" style="margin:2px 0 12px">${esc(P.shop||"магазин не распознан")}${P.date?" · "+esc(P.date):""}${P.total!=null?" · итог "+eur(P.total):""}${P.skipped?` · пропущено залоговых строк: ${P.skipped}`:""}</p>
+    ${P.check && P.check.fits === false ? `<p class="warn">Сумма позиций ${eur(P.check.sum)} не сходится с итогом чека ${eur(P.check.total)}. Проверь внимательно.</p>` : ""}
+    ${bad.length ? `<h4 class="psec">Требует внимания · ${bad.length}</h4>${bad.map(row).join("")}` : `<p class="note" style="margin:0 0 12px">Вопросов нет — всё сопоставилось.</p>`}
+    ${good.length ? `<details class="fold"><summary>Ещё ${good.length} ${plural(good.length,"позиция","позиции","позиций")} · всё понятно</summary>${good.map(row).join("")}</details>` : ""}
+    <div class="fields" style="margin-top:16px">
+      <button class="btn ghost" id="pCancel" style="flex:1">Отмена</button>
+      <button class="btn" id="pOk" style="flex:1">Записать закупку</button>
+    </div></div></div>`;
+  document.body.appendChild(bg);
+  const close = () => { bg.remove(); TG?.BackButton?.offClick(close); TG?.BackButton?.hide() };
+  TG?.BackButton?.show(); TG?.BackButton?.onClick(close);
+
+  bg.addEventListener("input", e => {
+    const el = e.target.closest(".prow"); if(!el) return;
+    const r = P.rows[+el.dataset.i];
+    if(e.target.classList.contains("pId"))   r.id   = e.target.value;
+    if(e.target.classList.contains("pQty"))  r.qty  = Math.max(0, parseInt(e.target.value)||0);
+    if(e.target.classList.contains("pUnit")) r.unit = num(e.target.value) || null;
+    if(e.target.classList.contains("pUse"))  r.use  = e.target.checked;
+  });
+  bg.addEventListener("click", async e => {
+    if(e.target === bg || e.target.id === "pCancel") return close();
+    if(e.target.id !== "pOk") return;
+    const take = P.rows.filter(r => r.use && r.id && r.qty > 0);
+    if(!take.length) return toast("Нечего записывать");
+    const items = {}, prices = {}, learn = [];
+    for(const r of take){
+      items[r.id] = (items[r.id] || 0) + r.qty;
+      if(r.unit > 0) prices[r.id] = r.unit;
+      learn.push({id:r.id, name:r.name, article:r.article, shop:P.shop});
+    }
+    e.target.disabled = true;
+    try{
+      await apply(API.addPurchase({date:new Date().toISOString(), items, prices, learn,
+        total: P.total ?? (num($("#buySum")?.value) || null),
+        by: $("#buyWho")?.value.trim() || null, source: P.shop || null, photo: S.f.photo || null}));
+      S.buy = {}; S.f.photo = null; S.f.parsed = null; S.f.buySum = "";
+      toast("Закупка записана по чеку"); haptic("medium"); close(); render();
+    }catch(err){ toast("Не сохранилось: "+err.message); e.target.disabled = false }
+  });
+}
 
 function showReceipt(src){
   const bg = document.createElement("div");

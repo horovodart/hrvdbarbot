@@ -97,6 +97,7 @@ window.API = (function(){
     async addPurchase(x){ return norm(await post("addPurchase", x)) },
     // фото чека тянем только когда карточку открыли: оно тяжёлое, в общий список не кладём
     async receipt(id){ return post("getReceipt", {id}) },
+    async parse(photo){ return post("parseReceipt", {photo}) },
     async addReturn(x){ return norm(await post("addReturn", x)) },
     async addCount(x){ return norm(await post("addCount", x)) },
     async addProduct(id, data){ return norm(await post("addProduct", {id, data})) },

@@ -12,13 +12,13 @@
  */
 
 var COLS = {
-  products: ['id','name','vol','cat','shape','color','cap','cost','dep','pack','min','order','note','hidden','phaseout'],
+  products: ['id','name','vol','cat','shape','color','cap','cost','dep','pack','min','order','note','hidden','phaseout','aliases'],
   counts:   ['id','date','by','cash','card','initial','note','source','stock','frozen','amnesty'],
   purchases:['id','date','by','total','source','items','receipt','prices'],
   returns:  ['id','date','by','amount','units','toTill','note'],
   team:     ['tg_id','name','role']
 };
-var JSON_FIELDS = {stock:1, items:1, frozen:1, prices:1};
+var JSON_FIELDS = {stock:1, items:1, frozen:1, prices:1, aliases:1};
 var NUM_FIELDS  = {cost:1, dep:1, pack:1, min:1, order:1, cash:1, card:1, total:1, amount:1, units:1};
 var BOOL_FIELDS = {hidden:1, initial:1, phaseout:1, toTill:1, amnesty:1};
 
@@ -161,6 +161,29 @@ function handle(action, p, user){
             moved[k] = {was: was, now: np};
             patch('products', k, {cost: np});
           }
+        });
+      }
+      // Словарь: что человек подтвердил, то и запоминаем за товаром. Второй чек
+      // из того же магазина разберётся почти без правок.
+      if (p.learn && p.learn.length) {
+        ensureCols('products');
+        var byId = {};
+        rows('products').forEach(function(r){ byId[r.id] = r });
+        var grouped = {};
+        p.learn.forEach(function(x){
+          if (!x || !x.id || !x.name || !byId[x.id]) return;
+          (grouped[x.id] = grouped[x.id] || []).push(x);
+        });
+        Object.keys(grouped).forEach(function(id){
+          var list = byId[id].aliases;
+          if (!list || typeof list.length !== 'number') list = [];
+          grouped[id].forEach(function(x){
+            var name = String(x.name).slice(0, 80), shop = x.shop ? String(x.shop).slice(0, 40) : '';
+            var art = x.article ? String(x.article).slice(0, 40) : '';
+            var dup = list.some(function(o){ return o.name === name && o.shop === shop });
+            if (!dup) list.push({shop: shop, name: name, article: art});
+          });
+          patch('products', id, {aliases: list.slice(-12)});   // помним последние написания
         });
       }
       insert('purchases', {id: pid, date: p.date || new Date().toISOString(), by: p.by || who,
@@ -373,7 +396,16 @@ function parseReceipt(photo){
 
   var all = rows('products');
   var cat = all.filter(function(p){ return !p.hidden })
-    .map(function(p){ return p.id + ' — ' + p.name + (p.vol ? ' — ' + p.vol : '') })
+    .map(function(p){
+      var line = p.id + ' — ' + p.name + (p.vol ? ' — ' + p.vol : '');
+      // как этот товар писали в прошлых чеках: по этому его узнать надёжнее,
+      // чем по нашему названию — в чеке оно всегда другое
+      var a = p.aliases;
+      if (a && a.length) line += '\n    в чеках: ' + a.slice(-8).map(function(x){
+        return (x.shop ? x.shop + ': ' : '') + x.name + (x.article ? ' [' + x.article + ']' : '');
+      }).join(' | ');
+      return line;
+    })
     .join('\n');
 
   var r = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
