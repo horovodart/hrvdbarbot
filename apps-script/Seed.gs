@@ -1,6 +1,6 @@
 /* Справочник товаров, команда и стартовые данные. */
 
-var SEED_VERSION = 17;
+var SEED_VERSION = 18;
 
 var SEED_RETIRE = {
   "returns": ["r-2026-08-15", "r-2026-07-21"]   // августовские 17,25 € вошли в эту запись, отдельной строкой не нужны
@@ -648,7 +648,7 @@ var SEED = {
     "staro05": {
       "cat": "sale",
       "color": "#B8322E",
-      "cost": 0.6,
+      "cost": 0.79,
       "dep": 0.15,
       "min": 6,
       "name": "Staropramen",
