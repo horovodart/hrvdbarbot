@@ -13,12 +13,24 @@
 
 var COLS = {
   products: ['id','name','vol','cat','shape','color','cap','cost','dep','pack','min','order','note','hidden','phaseout','aliases'],
-  counts:   ['id','date','by','cash','card','initial','note','source','stock','frozen','amnesty'],
-  purchases:['id','date','by','total','source','items','receipt','prices'],
-  returns:  ['id','date','by','amount','units','toTill','note'],
+  counts:   ['id','date','by','cash','card','initial','note','source','stock','frozen','amnesty','deleted','deletedBy','edited','editedBy'],
+  purchases:['id','date','by','total','source','items','receipt','prices','deleted','deletedBy','edited','editedBy'],
+  returns:  ['id','date','by','amount','units','toTill','note','deleted','deletedBy','edited','editedBy'],
   team:     ['tg_id','name','role']
 };
 var JSON_FIELDS = {stock:1, items:1, frozen:1, prices:1, aliases:1};
+
+/* Правка записей: только эти поля и только в этих листах.
+   Остатки в подсчёте править нельзя — у сохранённого подсчёта деньги периода
+   заморожены, и правка штук молча разошлась бы с ними. Чек и цены из чека
+   тоже не трогаем: это факт, а не ввод. */
+var EDITABLE = {
+  purchases: {total:1, source:1, by:1, items:1},
+  counts:    {cash:1, card:1, by:1, note:1},
+  returns:   {amount:1, units:1, toTill:1, note:1}
+};
+// удаляются мягко: строка остаётся, с пометкой кто и когда — её можно вернуть
+var SOFT_DELETE = {purchases:1, counts:1, returns:1};
 var NUM_FIELDS  = {cost:1, dep:1, pack:1, min:1, order:1, cash:1, card:1, total:1, amount:1, units:1};
 var BOOL_FIELDS = {hidden:1, initial:1, phaseout:1, toTill:1, amnesty:1};
 
@@ -205,7 +217,26 @@ function handle(action, p, user){
       patch('products', p.id, p.patch || {});
     } else if (action === 'delete'){
       if (['products','counts','purchases','returns'].indexOf(p.col) < 0) throw new Error('Нельзя удалять из ' + p.col);
-      remove(p.col, p.id);
+      if (SOFT_DELETE[p.col]) {
+        ensureCols(p.col);
+        if (findRow(p.col, p.id) < 0) throw new Error('Не нашёл ' + p.id);
+        patch(p.col, p.id, {deleted: new Date().toISOString(), deletedBy: who || ''});
+      } else remove(p.col, p.id);
+    } else if (action === 'restore'){
+      if (!SOFT_DELETE[p.col]) throw new Error('Нельзя вернуть из ' + p.col);
+      if (findRow(p.col, p.id) < 0) throw new Error('Не нашёл ' + p.id);
+      patch(p.col, p.id, {deleted: '', deletedBy: ''});
+    } else if (action === 'update'){
+      var allow = EDITABLE[p.col];
+      if (!allow) throw new Error('Нельзя править ' + p.col);
+      if (findRow(p.col, p.id) < 0) throw new Error('Не нашёл ' + p.id);
+      var clean = {}, n = 0;
+      Object.keys(p.patch || {}).forEach(function(k){ if (allow[k]) { clean[k] = p.patch[k]; n++ } });
+      if (!n) throw new Error('Нечего править');
+      ensureCols(p.col);
+      clean.edited = new Date().toISOString();
+      clean.editedBy = who || '';
+      patch(p.col, p.id, clean);
     } else if (action === 'getReceipt'){
       var buy = rows('purchases').filter(function(r){ return r.id === p.id })[0];
       if (!buy) throw new Error('Закупка не найдена');

@@ -507,6 +507,39 @@ console.log("\n— 9. сверка с tools/reference.py (hub-bar-data.json) —
 }
 
 /* ------------------------------------------------------------------ */
+console.log("\n— 14. удалённое не попадает в расчёты —");
+{
+  // Удаление теперь мягкое: строка остаётся в таблице с пометкой. Если такая
+  // строка просочится в модель, недобор и расход посчитаются по удалённому.
+  const vmMod = await import("node:vm");
+  const seed = {
+    products: {a:{name:"A", cat:"sale", cost:1}},
+    counts: {c1:{date:"2026-01-01T00:00:00.000Z", stock:{a:10}},
+             cX:{date:"2026-01-05T00:00:00.000Z", stock:{a:1}, deleted:"2026-01-06T00:00:00.000Z", deletedBy:"Катя"}},
+    purchases: {p1:{date:"2026-01-02T00:00:00.000Z", items:{a:6}, total:5},
+                pX:{date:"2026-01-03T00:00:00.000Z", items:{a:600}, total:500, deleted:"2026-01-04T00:00:00.000Z"}},
+    returns: {r1:{date:"2026-01-02T00:00:00.000Z", amount:3}, rX:{date:"2026-01-02T00:00:00.000Z", amount:99, deleted:"x"}}
+  };
+  const sb = { window:{}, JSON, Object, Date, Math, Promise, setTimeout,
+    localStorage:{ getItem:()=>null, setItem:()=>{}, removeItem:()=>{} },
+    fetch: async () => ({ json: async () => JSON.parse(JSON.stringify(seed)) }) };
+  sb.window.HUB_CONFIG = { API:"", SEED:"x.json" };
+  vmMod.createContext(sb);
+  vmMod.runInContext(readFileSync(new URL("../../../api.js", import.meta.url), "utf8"), sb);
+  const d = await sb.window.API.list();
+  eq("14.1 удалённый подсчёт не в работе", d.counts.map(x => x.id), ["c1"]);
+  eq("14.2 удалённая закупка не в работе", d.purchases.map(x => x.id), ["p1"]);
+  eq("14.3 удалённая сдача тары не в работе", d.returns.map(x => x.id), ["r1"]);
+  eq("14.4 а в корзине — всё удалённое", [d.trash.counts.length, d.trash.purchases.length, d.trash.returns.length], [1,1,1]);
+  eq("14.5 в корзине видно, кто удалил", d.trash.counts[0].deletedBy, "Катя");
+
+  // и модель на этих данных не видит закупку на 600 штук
+  const { hub } = loadHub({ now:"2026-01-10T00:00:00.000Z" });
+  Object.assign(hub.S, {products:d.products, counts:d.counts, purchases:d.purchases, returns:d.returns});
+  const M = hub.model();
+  eq("14.6 остаток считает только живые закупки", M.items.a.exact, 16);   // 10 + 6, а не + 600
+}
+
 console.log("\n— 13. черновик подсчёта —");
 {
   // Подсчёт — полчаса работы. Закрылось приложение, сел телефон, пропала сеть,

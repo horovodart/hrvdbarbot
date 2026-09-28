@@ -40,7 +40,7 @@ window.API = (function(){
 
   // Номер попытки сохранить. Генерируем ОДИН раз на действие человека, а не на
   // каждый повтор: иначе защита от дубля на сервере потеряет смысл.
-  const WRITES = ["addPurchase","addCount","addReturn","addProduct","updateProduct","delete"];
+  const WRITES = ["addPurchase","addCount","addReturn","addProduct","updateProduct","delete","restore","update"];
   const rid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 
   async function post(action, payload){
@@ -77,18 +77,33 @@ window.API = (function(){
     if(action === "addCount")     d.counts[uid("c")] = p;
     if(action === "addProduct")   d.products[p.id] = p.data;
     if(action === "updateProduct")Object.assign(d.products[p.id] ||= {}, p.patch);
-    if(action === "delete")       delete d[p.col]?.[p.id];
+    if(action === "delete"){
+      const r = d[p.col]?.[p.id];
+      if(r && p.col !== "products"){ r.deleted = new Date().toISOString(); r.deletedBy = "демо" }
+      else delete d[p.col]?.[p.id];
+    }
+    if(action === "restore"){ const r = d[p.col]?.[p.id]; if(r){ r.deleted = ""; r.deletedBy = "" } }
+    if(action === "update"){ const r = d[p.col]?.[p.id]; if(r) Object.assign(r, p.patch, {edited:new Date().toISOString()}) }
     writeLocal(d);
     return d;
   }
 
-  const norm = d => ({
-    products:  Object.entries(d.products  || {}).map(([id,v]) => ({id, ...v})),
-    counts:    Object.entries(d.counts    || {}).map(([id,v]) => ({id, ...v})),
-    purchases: Object.entries(d.purchases || {}).map(([id,v]) => ({id, ...v})),
-    returns:   Object.entries(d.returns   || {}).map(([id,v]) => ({id, ...v})),
-    live: live()
-  });
+  // Удалённое не стирается, а помечается. В расчёты оно попадать не должно,
+  // поэтому раскладываем сразу: живое — в работу, помеченное — в корзину.
+  const split = o => {
+    const on = [], off = [];
+    for(const [id, v] of Object.entries(o || {})) (v && v.deleted ? off : on).push({id, ...v});
+    return [on, off];
+  };
+  const norm = d => {
+    const [counts, cT] = split(d.counts), [purchases, pT] = split(d.purchases), [returns, rT] = split(d.returns);
+    return {
+      products: Object.entries(d.products || {}).map(([id,v]) => ({id, ...v})),
+      counts, purchases, returns,
+      trash: {counts: cT, purchases: pT, returns: rT},
+      live: live()
+    };
+  };
 
   return {
     live,
@@ -103,6 +118,8 @@ window.API = (function(){
     async addProduct(id, data){ return norm(await post("addProduct", {id, data})) },
     async updateProduct(id, patch){ return norm(await post("updateProduct", {id, patch})) },
     async del(col, id){ return norm(await post("delete", {col, id})) },
+    async restore(col, id){ return norm(await post("restore", {col, id})) },
+    async update(col, id, patch){ return norm(await post("update", {col, id, patch})) },
     resetDemo(){ localStorage.removeItem(LS); cache = null; }
   };
 })();

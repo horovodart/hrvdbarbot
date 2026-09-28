@@ -440,7 +440,16 @@ function previewCount(M){
 /* ---------- история ---------- */
 function renderHist(M){
   const name = id => S.products.find(p=>p.id===id)?.name || id;
-  let ev = [...M.recs.map(r=>({t:"rec",date:r.to.date,r})), ...M.purch.map(p=>({t:"buy",date:p.date,p}))];
+  // хвост карточки: кто сделал, кто правил, и две кнопки
+  const foot = (col, x, who) => {
+    const key = col + "/" + x.id, armed = S.armed === key;
+    return `<div class="hfoot">
+      <span class="note">${who ? esc(who) : ""}${x.edited ? `${who?" · ":""}поправлено${x.editedBy?" ("+esc(x.editedBy)+")":""} ${ddmm(x.edited)}` : ""}</span>
+      <span><button class="lnk" data-edit="${esc(key)}">править</button>
+      <button class="del ${armed?"armed":""}" data-del="${esc(key)}">${armed?"точно удалить?":"удалить"}</button></span></div>`;
+  };
+  let ev = [...M.recs.map(r=>({t:"rec",date:r.to.date,r})), ...M.purch.map(p=>({t:"buy",date:p.date,p})),
+            ...S.returns.map(x=>({t:"ret",date:x.date,x}))];
   if(M.counts[0]) ev.push({t:"first",date:M.counts[0].date,c:M.counts[0]});
   ev.sort((a,b)=> a.date<b.date?1:-1);
   if(!ev.length) return `<div class="empty">Пока пусто.</div>`;
@@ -452,7 +461,7 @@ function renderHist(M){
         <p class="note" style="margin:0 0 10px">${ddmm(r.from.date)}–${ddmm(r.to.date)} · ${r.days < 1 ? "меньше суток" : Math.round(r.days)+" дн."}</p>
         ${money(r)}<p class="note" style="margin:10px 0 0">${top}</p>
         ${r.to.note?`<p class="note" style="margin:8px 0 0">${esc(r.to.note)}</p>`:""}
-        <div style="text-align:right;margin-top:6px">${r.to.by?`<span class="note">считал(а): ${esc(r.to.by)}</span>`:""} <button class="del ${S.armed==="counts/"+r.to.id?"armed":""}" data-del="counts/${esc(r.to.id)}">${S.armed==="counts/"+r.to.id?"точно удалить?":"удалить"}</button></div></div>`;
+        ${foot("counts", r.to, r.to.by ? "считал(а): " + r.to.by : "")}</div>`;
     } else if(e.t === "buy"){ const p = e.p;
       const list = Object.entries(p.items||{}).filter(([,v])=>v>0).map(([k,v])=>`${esc(name(k))} +${esc(v)}`).join(" · ");
       const moved = p.prices?.moved && typeof p.prices.moved === "object" ? Object.entries(p.prices.moved) : [];
@@ -464,13 +473,86 @@ function renderHist(M){
                           : eur(m.was)+" → "+eur(m.now)+" · "+(m.now>m.was?"+":"−")+eur(Math.abs(m.now-m.was))}</b></div>`
           ).join("")}</div>` : ""}
         ${p.receipt ? `<button class="lnk rcpt" data-rcpt="${esc(p.id)}">посмотреть чек</button>` : ""}
-        <div style="text-align:right;margin-top:6px">${p.by?`<span class="note">${esc(p.by)}</span>`:""} <button class="del ${S.armed==="purchases/"+p.id?"armed":""}" data-del="purchases/${esc(p.id)}">${S.armed==="purchases/"+p.id?"точно удалить?":"удалить"}</button></div></div>`;
+        ${foot("purchases", p, p.by || "")}</div>`;
+    } else if(e.t === "ret"){ const x = e.x;
+      h += `<div class="panel pad"><div class="h"><b>Сдача тары ${ddmm(x.date)}</b><span class="num">${eur(+x.amount||0)}</span></div>
+        <p class="note" style="margin:0">${esc(x.units||0)} шт · ${x.toTill ? "деньги в кассу" : "мимо кассы"}${x.note ? " · " + esc(x.note) : ""}</p>
+        ${foot("returns", x, x.by || "")}</div>`;
     } else {
       h += `<div class="panel pad"><div class="h"><b>Опорный подсчёт ${ddmm(e.c.date)}</b></div>
         <p class="note" style="margin:0">${esc(e.c.note || "Точка отсчёта.")}</p>${e.c.source?`<p class="note" style="margin:6px 0 0">${esc(e.c.source)}</p>`:""}</div>`;
     }
   }
-  return h + `</div>`;
+  h += `</div>`;
+
+  // Удалённое не пропадает: видно, кто и когда удалил, и можно вернуть
+  const T = S.trash || {};
+  const gone = [
+    ...(T.purchases||[]).map(x => ({col:"purchases", x, what:"Закупка", sum:x.total})),
+    ...(T.counts   ||[]).map(x => ({col:"counts",    x, what:"Подсчёт", sum:null})),
+    ...(T.returns  ||[]).map(x => ({col:"returns",   x, what:"Сдача тары", sum:x.amount}))
+  ].sort((a,b) => (a.x.deleted < b.x.deleted ? 1 : -1));
+  if(gone.length) h += `<details class="fold trash"><summary>Удалённое · ${gone.length}</summary>${gone.map(g =>
+    `<div class="trow"><div><b>${g.what} ${ddmm(g.x.date)}</b>${g.sum!=null?` · <span class="num">${eur(+g.sum)}</span>`:""}
+      <div class="note">удалено${g.x.deletedBy?" ("+esc(g.x.deletedBy)+")":""} ${ddmm(g.x.deleted)}</div></div>
+      <button class="lnk" data-restore="${esc(g.col+"/"+g.x.id)}">вернуть</button></div>`).join("")}</details>`;
+  return h;
+}
+
+/* Правка записи. Разрешено ровно то, что разрешает сервер: остатки в подсчёте
+   не правятся — деньги периода там заморожены, и правка штук разошлась бы с ними. */
+function editSheet(col, x){
+  const name = id => S.products.find(p=>p.id===id)?.name || id;
+  const f = (id, label, val, mode) => `<div class="field"><label for="${id}">${label}</label><input id="${id}" value="${esc(val ?? "")}"${mode?` inputmode="${mode}"`:""}></div>`;
+  let body = "";
+  if(col === "purchases"){
+    body = `<div class="fields">${f("eTotal","Сумма чека, €",x.total,"decimal")}${f("eBy","Кто купил",x.by)}</div>
+      <div class="fields">${f("eSource","Где купили",x.source)}</div>
+      <h4 class="psec">Количества</h4>
+      ${Object.entries(x.items||{}).map(([k,v]) => `<div class="fields"><div class="field" style="min-width:100%"><label>${esc(name(k))}</label>
+        <input class="eItem" data-k="${esc(k)}" value="${esc(v)}" inputmode="numeric"></div></div>`).join("")}`;
+  } else if(col === "counts"){
+    body = `<div class="fields">${f("eCash","Касса, €",x.cash,"decimal")}${f("eCard","На карту, €",x.card,"decimal")}</div>
+      <div class="fields">${f("eBy","Кто считал",x.by)}</div>
+      <div class="fields">${f("eNote","Заметка",x.note)}</div>
+      <p class="note" style="margin:8px 0 0">Остатки в сохранённом подсчёте не правятся: деньги периода по ним уже посчитаны и заморожены.</p>`;
+  } else {
+    body = `<div class="fields">${f("eAmount","Сумма, €",x.amount,"decimal")}${f("eUnits","Штук",x.units,"numeric")}</div>
+      <label class="chk"><input type="checkbox" id="eTill" ${x.toTill?"checked":""}><span>Деньги положил в кассу</span></label>
+      <div class="fields">${f("eNote","Заметка",x.note)}</div>`;
+  }
+  const bg = document.createElement("div");
+  bg.className = "sheet-bg";
+  bg.innerHTML = `<div class="sheet"><div class="grab"><i></i></div><div class="body">
+    <h3>Править · ${col==="purchases"?"закупка":col==="counts"?"подсчёт":"сдача тары"} ${ddmm(x.date)}</h3>
+    <div style="margin-top:14px">${body}</div>
+    <div class="fields" style="margin-top:16px"><button class="btn ghost" id="eCancel" style="flex:1">Отмена</button>
+      <button class="btn" id="eOk" style="flex:1">Сохранить</button></div></div></div>`;
+  document.body.appendChild(bg);
+  const close = () => { bg.remove(); TG?.BackButton?.offClick(close); TG?.BackButton?.hide() };
+  TG?.BackButton?.show(); TG?.BackButton?.onClick(close);
+  bg.addEventListener("click", async e => {
+    if(e.target === bg || e.target.id === "eCancel") return close();
+    if(e.target.id !== "eOk") return;
+    const v = id => bg.querySelector("#"+id)?.value.trim();
+    let patch;
+    if(col === "purchases"){
+      const items = {};
+      bg.querySelectorAll(".eItem").forEach(i => { const n = Math.max(0, parseInt(i.value)||0); if(n) items[i.dataset.k] = n });
+      if(!(num(v("eTotal")) > 0)) return toast("Впиши сумму чека");
+      if(!v("eSource")) return toast("Впиши, где купили");
+      patch = {total:num(v("eTotal")), by:v("eBy")||null, source:v("eSource"), items};
+    } else if(col === "counts"){
+      patch = {cash:num(v("eCash")), card:num(v("eCard")), by:v("eBy")||null, note:v("eNote")||null};
+    } else {
+      if(!(num(v("eAmount")) > 0)) return toast("Впиши сумму");
+      patch = {amount:num(v("eAmount")), units:Math.max(0, parseInt(v("eUnits"))||0),
+               toTill:!!bg.querySelector("#eTill")?.checked, note:v("eNote")||null};
+    }
+    e.target.disabled = true;
+    try{ await apply(API.update(col, x.id, patch)); toast("Поправлено"); haptic("medium"); close() }
+    catch(err){ toast("Не сохранилось: "+err.message); e.target.disabled = false }
+  });
 }
 
 /* ---------- карточка товара ---------- */
@@ -687,7 +769,7 @@ function dock(){
   else d.hidden = true;
 }
 function toast(t){ const e = document.createElement("div"); e.className = "toast"; e.textContent = t; document.body.appendChild(e); setTimeout(()=>e.remove(), 2400) }
-async function apply(promise){ const d = await promise; S.products = d.products; S.counts = d.counts; S.purchases = d.purchases; S.returns = d.returns || []; render(); return d }
+async function apply(promise){ const d = await promise; S.products = d.products; S.counts = d.counts; S.purchases = d.purchases; S.returns = d.returns || []; S.trash = d.trash || {}; render(); return d }
 
 /* ---------- события ---------- */
 document.addEventListener("click", async e => {
@@ -723,6 +805,19 @@ document.addEventListener("click", async e => {
     return;
   }
   if(rf){ rf.classList.add("spin"); try{ await apply(API.list(true)); toast("Обновлено") }catch(err){ toast("Не вышло: "+err.message) } rf.classList.remove("spin"); return }
+  const ed = e.target.closest("[data-edit]");
+  if(ed){
+    const [col, id] = ed.dataset.edit.split("/");
+    const x = (col==="purchases"?S.purchases:col==="counts"?S.counts:S.returns).find(r => r.id === id);
+    if(x) editSheet(col, x);
+    return;
+  }
+  const rs = e.target.closest("[data-restore]");
+  if(rs){
+    const [col, id] = rs.dataset.restore.split("/");
+    try{ await apply(API.restore(col, id)); toast("Вернул"); haptic("light") }catch(er){ toast("Ошибка: "+er.message) }
+    return;
+  }
   const d = e.target.closest("[data-del]");
   if(d){ if(S.armed !== d.dataset.del){ S.armed = d.dataset.del; render(); return }
     const [col,id] = d.dataset.del.split("/");
@@ -985,7 +1080,7 @@ function showReceipt(src){
     if(!API.live() && !localHost)
       throw new Error("Приложение поднялось из кэша Telegram. Закрой его полностью и открой заново.");
     const d = await API.list();
-    S.products = d.products; S.counts = d.counts; S.purchases = d.purchases; S.returns = d.returns || []; S.loaded = true;
+    S.products = d.products; S.counts = d.counts; S.purchases = d.purchases; S.returns = d.returns || []; S.trash = d.trash || {}; S.loaded = true;
     if(!API.live()) $("#sub").dataset.demo = "1";
     render();
     if(!API.live()) toast("Демо-режим: правки живут только в этом браузере");

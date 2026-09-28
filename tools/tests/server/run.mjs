@@ -1108,8 +1108,95 @@ test('delete работает для разрешённого листа', () =>
   const fresh = ids.find(i => i.indexOf('r-') === 0 && i.length > 12 && !/^r-(start|20)/.test(i));
   assert.ok(fresh, 'сдача создана, id: ' + ids.join(','));
   api.handle('delete', { col: 'returns', id: fresh }, { id: '1', name: 'Маша' });
-  assert.ok(!api.listAll().returns[fresh], 'строка удалена');
+  // удаление мягкое: строка на месте, но помечена — её можно вернуть
+  const r = api.listAll().returns[fresh];
+  assert.ok(r, 'строка не стёрта');
+  assert.ok(r.deleted, 'помечена удалённой');
+  assert.equal(r.deletedBy, 'Маша', 'и видно, кто удалил');
   assert.equal(env.lockCalls.held, 0);
+});
+
+G('14. правка и след от удаления');
+
+const U = { id:'1', name:'Катя' };
+const freshBuy = (api, total) => {
+  const out = api.handle('addPurchase', { total, items:{aro05:6}, source:'Metro', by:'Миша' }, { id:'1', name:'Миша' });
+  return Object.entries(out.purchases).find(([,x]) => x.total === total)[0];
+};
+
+test('удалённую закупку можно вернуть', () => {
+  const { api } = readyApp();
+  const id = freshBuy(api, 101);
+  api.handle('delete', { col:'purchases', id }, U);
+  assert.ok(api.listAll().purchases[id].deleted, 'помечена удалённой');
+  api.handle('restore', { col:'purchases', id }, U);
+  const b = api.listAll().purchases[id];
+  assert.ok(!b.deleted, 'пометка снята');
+  assert.equal(b.total, 101, 'данные целы');
+});
+
+test('удалённое не теряет своих данных — сумма, товары, чек', () => {
+  const { api } = readyApp();
+  const id = freshBuy(api, 102);
+  api.handle('delete', { col:'purchases', id }, U);
+  const b = api.listAll().purchases[id];
+  assert.equal(b.total, 102);
+  assert.equal(b.items.aro05, 6);
+  assert.equal(b.source, 'Metro');
+});
+
+test('правка закупки: сумма, магазин и количества', () => {
+  const { api } = readyApp();
+  const id = freshBuy(api, 103);
+  api.handle('update', { col:'purchases', id, patch:{ total: 99.5, source:'Kaufland', items:{aro05:12} } }, U);
+  const b = api.listAll().purchases[id];
+  assert.equal(b.total, 99.5);
+  assert.equal(b.source, 'Kaufland');
+  assert.equal(b.items.aro05, 12);
+  assert.equal(b.editedBy, 'Катя', 'видно, кто правил');
+  assert.ok(b.edited, 'и когда');
+});
+
+test('правка не трогает то, что не разрешено: чек, цены, дату, автора', () => {
+  const { api } = readyApp();
+  const id = freshBuy(api, 104);
+  const before = api.listAll().purchases[id];
+  api.handle('update', { col:'purchases', id, patch:{ total: 1, receipt:'подмена', prices:{x:1}, date:'2000-01-01', id:'другой' } }, U);
+  const b = api.listAll().purchases[id];
+  assert.equal(b.total, 1, 'разрешённое поле применилось');
+  assert.equal(b.receipt, before.receipt, 'чек не подменить');
+  assert.deepEqual(b.prices, before.prices, 'цены из чека не подменить');
+  assert.equal(b.date, before.date, 'дату не подменить');
+  assert.ok(api.listAll().purchases[id], 'id на месте');
+});
+
+test('остатки в подсчёте править нельзя — деньги периода заморожены', () => {
+  const { api } = readyApp();
+  const out = api.handle('addCount', { date:'2026-10-10T10:00:00.000Z', cash: 50, card: 0, stock:{aro05:5} }, U);
+  const id = Object.entries(out.counts).find(([,c]) => c.cash === 50)[0];
+  throws(() => api.handle('update', { col:'counts', id, patch:{ stock:{aro05:500} } }, U), /Нечего править/);
+  api.handle('update', { col:'counts', id, patch:{ cash: 55, stock:{aro05:500} } }, U);
+  const c = api.listAll().counts[id];
+  assert.equal(c.cash, 55, 'кассу поправить можно');
+  assert.equal(c.stock.aro05, 5, 'а остаток остался прежним');
+});
+
+test('правка сдачи тары', () => {
+  const { api } = readyApp();
+  const out = api.handle('addReturn', { amount: 15.15, units: 101, toTill: true }, U);
+  const id = Object.entries(out.returns).find(([,r]) => r.amount === 15.15)[0];
+  api.handle('update', { col:'returns', id, patch:{ amount: 15.30, units: 102 } }, U);
+  const r = api.listAll().returns[id];
+  assert.equal(r.amount, 15.30);
+  assert.equal(r.units, 102);
+});
+
+test('чужой лист и несуществующая запись — понятная ошибка, замок отпущен', () => {
+  const { env, api } = readyApp();
+  throws(() => api.handle('update', { col:'team', id:'1', patch:{ role:'admin' } }, U), /Нельзя править/);
+  throws(() => api.handle('update', { col:'purchases', id:'нет-такой', patch:{ total:1 } }, U), /Не нашёл/);
+  throws(() => api.handle('restore', { col:'team', id:'1' }, U), /Нельзя вернуть/);
+  assert.equal(env.lockCalls.held, 0, 'замок не остался висеть');
 });
 
 test('addCount пишет подсчёт и возвращает свежий склад', () => {
