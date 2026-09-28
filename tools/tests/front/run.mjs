@@ -507,6 +507,30 @@ console.log("\n— 9. сверка с tools/reference.py (hub-bar-data.json) —
 }
 
 /* ------------------------------------------------------------------ */
+console.log("\n— 15. порядок подсчёта по полкам —");
+{
+  const { hub } = loadHub({ now:"2026-01-10T00:00:00.000Z" });
+  const P = (id, cat, shelf) => ({id, cat, cost:1, shelf});
+  const ord = hub.shelfOrder([P("w1","water"), P("b1","sale",3), P("s1","snack"), P("b2","sale"), P("w2","water",1), P("x","shared",2)]);
+  eq("15.1 сначала полочные — строго по номеру полки", ord.slice(0,3).map(p => p.id), ["w2","x","b1"]);
+  eq("15.2 полка смешивает категории — вода перед пивом, если так стоит", ord[0].cat, "water");
+  eq("15.3 остальные — по категориям, как было", ord.slice(3).map(p => p.id), ["b2","w1","s1"]);
+  eq("15.4 без полок порядок прежний, по категориям",
+     hub.shelfOrder([P("s","snack"), P("w","water"), P("b","sale")]).map(p => p.id), ["b","w","s"]);
+  eq("15.5 ни один товар не теряется", ord.length, 6);
+
+  // и подсчёт идёт именно в этом порядке
+  Object.assign(hub.S, {
+    products: [P("a","sale"), P("b","sale",2), P("c","water",1)],
+    counts: [{id:"c1", date:"2026-01-01T00:00:00.000Z", stock:{a:1, b:1, c:1}}], purchases: [], returns: []
+  });
+  hub.S.M = hub.model(); hub.S.count = null;
+  const html = hub.renderCount(hub.S.M);
+  const at = id => html.indexOf(`id="c-${id}"`);          // поле ввода количества у каждой строки
+  ok("15.6 в подсчёте c (полка 1) раньше b (полка 2), а b раньше a (без полки)",
+     at("c") < at("b") && at("b") < at("a"), `позиции: c=${at("c")} b=${at("b")} a=${at("a")}`);
+}
+
 console.log("\n— 14. удалённое не попадает в расчёты —");
 {
   // Удаление теперь мягкое: строка остаётся в таблице с пометкой. Если такая

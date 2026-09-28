@@ -12,7 +12,7 @@
  */
 
 var COLS = {
-  products: ['id','name','vol','cat','shape','color','cap','cost','dep','pack','min','order','note','hidden','phaseout','aliases'],
+  products: ['id','name','vol','cat','shape','color','cap','cost','dep','pack','min','order','note','hidden','phaseout','aliases','shelf'],
   counts:   ['id','date','by','cash','card','initial','note','source','stock','frozen','amnesty','deleted','deletedBy','edited','editedBy'],
   purchases:['id','date','by','total','source','items','receipt','prices','deleted','deletedBy','edited','editedBy'],
   returns:  ['id','date','by','amount','units','toTill','note','deleted','deletedBy','edited','editedBy'],
@@ -31,7 +31,7 @@ var EDITABLE = {
 };
 // удаляются мягко: строка остаётся, с пометкой кто и когда — её можно вернуть
 var SOFT_DELETE = {purchases:1, counts:1, returns:1};
-var NUM_FIELDS  = {cost:1, dep:1, pack:1, min:1, order:1, cash:1, card:1, total:1, amount:1, units:1};
+var NUM_FIELDS  = {cost:1, dep:1, pack:1, min:1, order:1, shelf:1, cash:1, card:1, total:1, amount:1, units:1};
 var BOOL_FIELDS = {hidden:1, initial:1, phaseout:1, toTill:1, amnesty:1};
 
 /* ---------------- вход ---------------- */
@@ -222,6 +222,23 @@ function handle(action, p, user){
         if (findRow(p.col, p.id) < 0) throw new Error('Не нашёл ' + p.id);
         patch(p.col, p.id, {deleted: new Date().toISOString(), deletedBy: who || ''});
       } else remove(p.col, p.id);
+    } else if (action === 'reorder'){
+      // Порядок обхода полок при подсчёте. Отдельно от order: полка смешивает
+      // категории — вода стоит рядом с пивом, — а меню группирует по ним.
+      // Одна запись колонки целиком: по строке на товар выходило бы полсотни походов.
+      if (!p.ids || !p.ids.length) throw new Error('Пустой порядок');
+      ensureCols('products');
+      var psh = sheet('products'), plast = psh.getLastRow();
+      var phead = psh.getRange(1,1,1,psh.getLastColumn()).getValues()[0];
+      var cId = phead.indexOf('id'), cShelf = phead.indexOf('shelf');
+      if (plast > 1) {
+        var idv = psh.getRange(2, cId + 1, plast - 1, 1).getValues();
+        var pos = {};
+        p.ids.forEach(function(x, i){ pos[String(x)] = i + 1 });
+        // кого нет в списке — порядок снимаем: встанут в конец по категориям
+        var out = idv.map(function(r){ var k = String(r[0]); return [pos[k] != null ? pos[k] : ''] });
+        psh.getRange(2, cShelf + 1, plast - 1, 1).setValues(out);
+      }
     } else if (action === 'restore'){
       if (!SOFT_DELETE[p.col]) throw new Error('Нельзя вернуть из ' + p.col);
       if (findRow(p.col, p.id) < 0) throw new Error('Не нашёл ' + p.id);

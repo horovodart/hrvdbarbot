@@ -76,9 +76,9 @@ header.top.stuck::after{opacity:1}
 .panel.pad{padding:14px}
 .row{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}
 .row:last-child{border-bottom:0}
-.row .mini{width:46px;height:46px;border-radius:12px;flex:none;display:grid;place-items:center;background:var(--tile);padding:4px}
-.row .mini img{width:100%;height:100%;object-fit:contain;mix-blend-mode:multiply}
-.row .mini svg{height:34px;width:auto}
+.row .mini,.srow .mini{width:46px;height:46px;border-radius:12px;flex:none;display:grid;place-items:center;background:var(--tile);padding:4px}
+.row .mini img,.srow .mini img{width:100%;height:100%;object-fit:contain;mix-blend-mode:multiply}
+.row .mini svg,.srow .mini svg{height:34px;width:auto}
 .row .info{flex:1;min-width:0}
 .row .info .nm{font-weight:600;line-height:1.25}
 .row .info .sub2{color:var(--ink-2);font-size:12.5px;margin-top:1px}
@@ -245,3 +245,16 @@ button.sec:active{opacity:.6}
 .trash summary{cursor:pointer;color:var(--dim);font-size:14px;padding:6px 0}
 .trow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
 .trow .lnk{margin:0;white-space:nowrap}
+
+/* ---------- порядок подсчёта по полкам ---------- */
+.chip.pen{padding:0 12px;margin-left:auto;color:var(--dim)}
+.slist{display:flex;flex-direction:column}
+.srow{display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid var(--line);
+  background:var(--card);position:relative}
+.srow:first-child{border-top:0}
+.srow .info{flex:1;min-width:0}
+.srow .nm{font-weight:600}
+.dh{flex:0 0 44px;height:44px;display:grid;place-items:center;color:var(--dim);
+  touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none}
+.srow.dragging{z-index:5;box-shadow:0 8px 24px rgba(10,12,18,.16);border-radius:12px;transition:none}
+.srow.dragging .dh{cursor:grabbing;color:var(--accent)}

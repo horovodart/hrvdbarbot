@@ -40,7 +40,7 @@ window.API = (function(){
 
   // Номер попытки сохранить. Генерируем ОДИН раз на действие человека, а не на
   // каждый повтор: иначе защита от дубля на сервере потеряет смысл.
-  const WRITES = ["addPurchase","addCount","addReturn","addProduct","updateProduct","delete","restore","update"];
+  const WRITES = ["addPurchase","addCount","addReturn","addProduct","updateProduct","delete","restore","update","reorder"];
   const rid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 
   async function post(action, payload){
@@ -82,6 +82,10 @@ window.API = (function(){
       if(r && p.col !== "products"){ r.deleted = new Date().toISOString(); r.deletedBy = "демо" }
       else delete d[p.col]?.[p.id];
     }
+    if(action === "reorder"){
+      const pos = {}; (p.ids||[]).forEach((x,i) => pos[x] = i + 1);
+      for(const [id, v] of Object.entries(d.products)) v.shelf = pos[id] ?? null;
+    }
     if(action === "restore"){ const r = d[p.col]?.[p.id]; if(r){ r.deleted = ""; r.deletedBy = "" } }
     if(action === "update"){ const r = d[p.col]?.[p.id]; if(r) Object.assign(r, p.patch, {edited:new Date().toISOString()}) }
     writeLocal(d);
@@ -119,6 +123,7 @@ window.API = (function(){
     async updateProduct(id, patch){ return norm(await post("updateProduct", {id, patch})) },
     async del(col, id){ return norm(await post("delete", {col, id})) },
     async restore(col, id){ return norm(await post("restore", {col, id})) },
+    async reorder(ids){ return norm(await post("reorder", {ids})) },
     async update(col, id, patch){ return norm(await post("update", {col, id, patch})) },
     resetDemo(){ localStorage.removeItem(LS); cache = null; }
   };

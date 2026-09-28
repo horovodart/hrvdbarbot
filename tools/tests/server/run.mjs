@@ -1116,6 +1116,52 @@ test('delete работает для разрешённого листа', () =>
   assert.equal(env.lockCalls.held, 0);
 });
 
+G('15. порядок обхода полок');
+
+test('порядок пишется за один проход, а не по строке на товар', () => {
+  const { env, api } = readyApp();
+  const ids = ['aro15', 'kozel05', 'aro05'];
+  env.stats.reset();
+  const out = api.handle('reorder', { ids }, { id:'1', name:'Миша' });
+  assert.equal(out.products.aro15.shelf, 1);
+  assert.equal(out.products.kozel05.shelf, 2);
+  assert.equal(out.products.aro05.shelf, 3);
+  const writes = env.stats.log.filter(x => /setValue\b/.test(x)).length;
+  assert.equal(writes, 0, 'по ячейке писать нельзя — только одной записью колонки');
+});
+
+test('кого нет в новом порядке — порядок снимается', () => {
+  const { api } = readyApp();
+  api.handle('reorder', { ids:['aro15','kozel05'] }, { id:'1', name:'Миша' });
+  const out = api.handle('reorder', { ids:['kozel05'] }, { id:'1', name:'Миша' });
+  assert.equal(out.products.kozel05.shelf, 1);
+  assert.equal(out.products.aro15.shelf, null, 'aro15 выпал из списка — полка снята');
+});
+
+test('порядок не трогает меню и цены', () => {
+  const { api } = readyApp();
+  const before = api.handle('list', {}, { id:'1', name:'Миша' }).products.aro05;
+  const after = api.handle('reorder', { ids:['aro05'] }, { id:'1', name:'Миша' }).products.aro05;
+  assert.equal(after.order, before.order, 'order меню не тронут');
+  assert.equal(after.cost, before.cost, 'цена не тронута');
+});
+
+test('синк справочника порядок полок не сбрасывает', () => {
+  const { env, api } = readyApp();
+  api.handle('reorder', { ids:['aro05','kozel05'] }, { id:'1', name:'Миша' });
+  env.props.SEED_VERSION = '1';                    // как будто вышла новая версия сида
+  api.syncProducts();
+  const out = api.handle('list', { fresh:true }, { id:'1', name:'Миша' });
+  assert.equal(out.products.aro05.shelf, 1);
+  assert.equal(out.products.kozel05.shelf, 2);
+});
+
+test('пустой порядок — понятная ошибка', () => {
+  const { env, api } = readyApp();
+  throws(() => api.handle('reorder', { ids:[] }, { id:'1', name:'Миша' }), /Пустой порядок/);
+  assert.equal(env.lockCalls.held, 0);
+});
+
 G('14. правка и след от удаления');
 
 const U = { id:'1', name:'Катя' };

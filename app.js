@@ -257,7 +257,8 @@ function renderMenu(M){
     `<button class="chip" data-f="all" aria-pressed="${S.filter==="all"}">Всё<span class="n num">${shown.length}</span></button>`+
     `<button class="chip" data-f="red" aria-pressed="${S.filter==="red"}"><span class="dot" style="background:var(--red)"></span>Докупить<span class="n num">${cnt("red")}</span></button>`+
     `<button class="chip" data-f="amber" aria-pressed="${S.filter==="amber"}"><span class="dot" style="background:var(--amber)"></span>Скоро<span class="n num">${cnt("amber")}</span></button>`+
-    (S.products.some(p=>p.hidden) ? `<button class="chip" data-f="hidden" aria-pressed="${S.filter==="hidden"}">Убранные<span class="n num">${S.products.filter(p=>p.hidden).length}</span></button>` : "");
+    (S.products.some(p=>p.hidden) ? `<button class="chip" data-f="hidden" aria-pressed="${S.filter==="hidden"}">Убранные<span class="n num">${S.products.filter(p=>p.hidden).length}</span></button>` : "")+
+    `<button class="chip pen" id="shelfBtn" aria-label="Порядок подсчёта по полкам" title="Порядок подсчёта по полкам"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg></button>`;
 
   let html = "";
   const r = M.lastRec;
@@ -376,11 +377,22 @@ function draftSave(){
 function draftDrop(){ try{ localStorage.removeItem(DRAFT) }catch(e){} }
 
 /* ---------- подсчёт ---------- */
+// Выкидываем позицию из подсчёта только если её обнулил ЧЕЛОВЕК на прошлом подсчёте.
+// По расчётной оценке нельзя: виски на полке «допился» бы сам и исчез из приложения.
+const countableIn = M => p => M.items[p.id] && (M.items[p.id].restock || (M.items[p.id].base ?? 0) > 0 || M.items[p.id].bought > 0);
+
+// Порядок обхода: сначала те, кому задана полка, — ровно в этом порядке,
+// потом остальные по категориям, как раньше. Новый товар не теряется.
+function shelfOrder(list){
+  const on  = list.filter(p => p.shelf != null).sort((a,b) => a.shelf - b.shelf);
+  const off = CATS.flatMap(c => list.filter(p => p.shelf == null && p.cat === c));
+  const rest = list.filter(p => p.shelf == null && !CATS.includes(p.cat));
+  return [...on, ...off, ...rest];
+}
+
 function renderCount(M){
   const all = sorted();
-  // Выкидываем позицию из подсчёта только если её обнулил ЧЕЛОВЕК на прошлом подсчёте.
-  // По расчётной оценке нельзя: виски на полке «допился» бы сам и исчез из приложения.
-  const countable = p => M.items[p.id].restock || (M.items[p.id].base ?? 0) > 0 || M.items[p.id].bought > 0;
+  const countable = countableIn(M);
   // Поля заполняем фактом: прошлый подсчёт плюс закупки. Расчётным расходом нельзя —
   // иначе догадка приложения молча станет записанным подсчётом.
   if(!S.count){
@@ -400,7 +412,7 @@ function renderCount(M){
       }в ${new Date(S.draftAt).toTimeString().slice(0,5)}</span><button class="lnk" id="draftReset">начать заново</button></div>` : ""}
     <p class="note" style="margin:0 0 12px">Посчитай холодильник и полки вместе. Поля заполнены прошлым подсчётом плюс закупки — поправь на то, что видишь.</p><div class="panel">`;
   // кончившееся на сбыте не переспрашиваем: понадобится — заведут заново
-  for(const cat of CATS) for(const p of all.filter(x => x.cat===cat && countable(x))){
+  for(const p of shelfOrder(all.filter(countable))){
     const it = M.items[p.id];
     h += `<div class="row"><div class="mini">${pic(p)}</div><div class="info"><div class="nm">${esc(p.name)}</div>
       <div class="sub2 num">было ${esc(it.base ?? "—")}${it.bought?" + куплено "+esc(it.bought):""}</div></div>${stepper(p.id, S.count[p.id] ?? 0, "c")}</div>`;
@@ -788,6 +800,7 @@ document.addEventListener("click", async e => {
   if(s && !s.closest(".sheet-bg")){ const inp = s.parentElement.querySelector("input"), v = Math.max(0,(parseInt(inp.value)||0) + (+s.dataset.d)); inp.value = v; setVal(inp.dataset.k, s.dataset.id, v); haptic("light"); return }
   if(e.target.closest("#fillNeed")){ for(const p of sorted()){ const n = S.M.items[p.id]?.need; if(n) S.buy[p.id] = n } render(); toast("Список перенесён — поправь по чеку"); return }
   const rf = e.target.closest("#refresh");
+  if(e.target.closest("#shelfBtn")){ shelfSheet(); return }
   if(e.target.id === "manualToggle"){ S.f.manual = !S.f.manual; render(); return }
   if(e.target.id === "draftReset"){
     draftDrop(); S.count = null; S.draftAt = null; S.f.cCash = S.f.cCard = ""; S.f.amnesty = false;
@@ -994,7 +1007,7 @@ async function addProduct(){
    Нужен для сверки цифр приложения против эталонного пересчёта. */
 // Отладочный ход: без него окна вроде подтверждения чека нечем проверить глазами
 if(location.search.includes("debug=1"))
-  window.__hub = {S, model, render, parseSheet, prepParsed, draftLoad, draftSave, draftDrop, renderCount, get M(){ return S.M }};
+  window.__hub = {S, model, render, parseSheet, prepParsed, draftLoad, draftSave, draftDrop, renderCount, shelfOrder, shelfSheet, get M(){ return S.M }};
 
 /* Окно подтверждения разбора */
 function parseSheet(){
@@ -1057,6 +1070,77 @@ function parseSheet(){
       toast("Закупка записана по чеку"); haptic("medium"); close(); render();
     }catch(err){ toast("Не сохранилось: "+err.message); e.target.disabled = false }
   });
+}
+
+/* Порядок обхода полок. Перетаскиваешь за ручку — отпускаешь — сохраняешь.
+   Порядок общий на всю команду: полки у всех одни и те же. */
+function shelfSheet(){
+  const M = S.M; if(!M) return;
+  const list = shelfOrder(sorted().filter(countableIn(M)));
+  const bg = document.createElement("div");
+  bg.className = "sheet-bg";
+  bg.innerHTML = `<div class="sheet"><div class="grab"><i></i></div><div class="body">
+    <h3>Порядок подсчёта</h3>
+    <p class="note" style="margin:4px 0 14px">Перетащи за ручку справа — в том порядке, в каком обходишь холодильник и полки. Подсчёт пойдёт сверху вниз.</p>
+    <div class="slist">${list.map(p => `<div class="srow" data-id="${esc(p.id)}">
+      <div class="mini">${pic(p)}</div>
+      <div class="info"><div class="nm">${esc(p.name)}</div><div class="sub2">${esc(p.vol||"")}</div></div>
+      <span class="dh" aria-label="Перетащить"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg></span>
+    </div>`).join("")}</div>
+    <div class="fields" style="margin-top:16px"><button class="btn ghost" id="shCancel" style="flex:1">Отмена</button>
+      <button class="btn" id="shOk" style="flex:1">Сохранить порядок</button></div></div></div>`;
+  document.body.appendChild(bg);
+  const close = () => { bg.remove(); TG?.BackButton?.offClick(close); TG?.BackButton?.hide() };
+  TG?.BackButton?.show(); TG?.BackButton?.onClick(close);
+  sortable(bg.querySelector(".slist"), bg.querySelector(".sheet"));
+  bg.addEventListener("click", async e => {
+    if(e.target === bg || e.target.id === "shCancel") return close();
+    if(e.target.id !== "shOk") return;
+    const ids = [...bg.querySelectorAll(".srow")].map(r => r.dataset.id);
+    e.target.disabled = true;
+    try{ await apply(API.reorder(ids)); toast("Порядок сохранён"); haptic("medium"); close() }
+    catch(err){ toast("Не сохранилось: "+err.message); e.target.disabled = false }
+  });
+}
+
+/* Перетаскивание строк пальцем. HTML5 drag-and-drop на телефонах не работает,
+   поэтому на pointer-событиях: тянем за ручку, строка едет за пальцем, соседи
+   меняются местами, когда палец переходит их середину. У краёв окна — прокрутка. */
+function sortable(list, scroller){
+  let d = null;
+  const rows = () => [...list.querySelectorAll(".srow")];
+  list.addEventListener("pointerdown", e => {
+    const h = e.target.closest(".dh"); if(!h) return;
+    e.preventDefault();
+    d = {row: h.closest(".srow"), y: e.clientY, id: e.pointerId, top: scroller.scrollTop};
+    h.setPointerCapture(e.pointerId);
+    d.row.classList.add("dragging");
+    haptic("light");
+  });
+  list.addEventListener("pointermove", e => {
+    if(!d || e.pointerId !== d.id) return;
+    // прокрутка у краёв: сдвигаем точку отсчёта на столько же, чтобы строка не отставала от пальца
+    const b = scroller.getBoundingClientRect();
+    if(e.clientY < b.top + 70) scroller.scrollTop -= 10;
+    else if(e.clientY > b.bottom - 70) scroller.scrollTop += 10;
+    const ds = scroller.scrollTop - d.top; d.top = scroller.scrollTop; d.y -= ds;
+
+    // Цикл, а не одна проверка: быстрый рывок пальцем проходит мимо нескольких
+    // строк за одно событие, и строка должна проехать их все, а не одну.
+    let dy = e.clientY - d.y, moved = false;
+    for(;;){
+      const rs = rows(), i = rs.indexOf(d.row), next = rs[i + 1], prev = rs[i - 1];
+      if(next && dy > next.offsetHeight / 2){ list.insertBefore(next, d.row); d.y += next.offsetHeight }
+      else if(prev && dy < -prev.offsetHeight / 2){ list.insertBefore(d.row, prev); d.y -= prev.offsetHeight }
+      else break;
+      dy = e.clientY - d.y; moved = true;
+    }
+    if(moved) haptic("light");
+    d.row.style.transform = `translateY(${dy}px)`;
+  });
+  const end = () => { if(!d) return; d.row.style.transform = ""; d.row.classList.remove("dragging"); d = null };
+  list.addEventListener("pointerup", end);
+  list.addEventListener("pointercancel", end);
 }
 
 function showReceipt(src){
