@@ -507,6 +507,59 @@ console.log("\n— 9. сверка с tools/reference.py (hub-bar-data.json) —
 }
 
 /* ------------------------------------------------------------------ */
+console.log("\n— 13. черновик подсчёта —");
+{
+  // Подсчёт — полчаса работы. Закрылось приложение, сел телефон, пропала сеть,
+  // ушёл на другую вкладку — набранное должно остаться.
+  const base = () => ({
+    products: [{id:"a", cat:"sale", cost:1}, {id:"b", cat:"sale", cost:1}],
+    counts: [{id:"c1", date:"2026-01-01T00:00:00.000Z", stock:{a:10, b:20}}],
+    purchases: [], returns: []
+  });
+  const boot = (data) => {
+    const { hub } = loadHub({ now:"2026-01-05T12:00:00.000Z" });
+    Object.assign(hub.S, data); hub.S.M = hub.model(); return hub;
+  };
+
+  const h1 = boot(base());
+  h1.S.count = null; h1.renderCount(h1.S.M);
+  eq("13.1 без черновика поля заполнены фактом", [h1.S.count.a, h1.S.count.b], [10, 20]);
+  eq("13.2 без черновика плашки «продолжаем» нет", h1.S.draftAt, null);
+
+  // человек насчитал и «закрыл приложение»
+  h1.S.count.a = 7; h1.S.f.cCash = "42,50"; h1.S.f.cWho = "Катя"; h1.draftSave();
+  h1.S.count = null; h1.S.f = {};
+  h1.renderCount(h1.S.M);
+  eq("13.3 после возврата цифры на месте", h1.S.count.a, 7);
+  eq("13.4 и нетронутые позиции тоже", h1.S.count.b, 20);
+  eq("13.5 касса и имя вернулись", [h1.S.f.cCash, h1.S.f.cWho], ["42,50", "Катя"]);
+  ok("13.6 показываем, что это продолжение", !!h1.S.draftAt);
+
+  // пока считали, кто-то сохранил новый подсчёт — черновик устарел
+  const d2 = base();
+  d2.counts.push({id:"c2", date:"2026-01-04T00:00:00.000Z", stock:{a:9, b:19}, cash:0});
+  h1.S.counts = d2.counts; h1.S.M = h1.model();
+  eq("13.7 чужой черновик не подставляется", h1.draftLoad("c2"), null);
+  eq("13.8 и выбрасывается, а не копится", h1.draftLoad("c1"), null);
+
+  // новый товар в черновике не значится — берёт свежее заполнение,
+  // а позиция, которой в подсчёте больше нет, из черновика не воскресает
+  const h3 = boot(base());
+  h3.S.count = null; h3.renderCount(h3.S.M);
+  h3.S.count.a = 3; h3.S.count.ghost = 99; h3.draftSave();
+  h3.S.products = [...h3.S.products, {id:"n", cat:"sale", cost:1, pack:6}];
+  h3.S.purchases = [{id:"p", date:"2026-01-02T00:00:00.000Z", items:{n:6}}];
+  h3.S.M = h3.model(); h3.S.count = null; h3.renderCount(h3.S.M);
+  eq("13.9 черновик лёг поверх", h3.S.count.a, 3);
+  eq("13.10 новый товар — свежим заполнением", h3.S.count.n, 6);
+  ok("13.11 чужая позиция не воскресла", !("ghost" in h3.S.count));
+
+  // битое хранилище не роняет подсчёт
+  const h4 = boot(base());
+  h4.draftDrop();
+  eq("13.12 пустое хранилище — просто нет черновика", h4.draftLoad("c1"), null);
+}
+
 console.log("\n— 12. история цен: где и почём брали —");
 {
   // Цена зависит от магазина: в Metro одно, в Lidl другое. Правило «считаем по

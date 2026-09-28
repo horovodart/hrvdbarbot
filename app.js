@@ -353,6 +353,28 @@ function renderBuy(M){
   return h;
 }
 
+/* ---------- черновик подсчёта ----------
+   Подсчёт — это полчаса работы, и терять её от закрытого приложения, севшего
+   телефона или пропавшей сети нельзя. Каждая цифра сразу ложится в память
+   телефона. Черновик привязан к прошлому подсчёту: если за это время кто-то
+   сохранил новый, старый черновик устарел и подставляться не должен. */
+const DRAFT = "hub-count-draft-v1";
+function draftLoad(baseId){
+  try{
+    const d = JSON.parse(localStorage.getItem(DRAFT) || "null");
+    if(!d || typeof d !== "object" || !d.count) return null;
+    if(d.base !== baseId){ draftDrop(); return null }     // устарел — выбрасываем
+    return d;
+  }catch(e){ return null }
+}
+function draftSave(){
+  if(!S.count) return;
+  try{ localStorage.setItem(DRAFT, JSON.stringify({
+    base: S.M?.last?.id || null, at: Date.now(), count: S.count,
+    cash: S.f.cCash || "", card: S.f.cCard || "", who: S.f.cWho || "", amnesty: !!S.f.amnesty })) }catch(e){}
+}
+function draftDrop(){ try{ localStorage.removeItem(DRAFT) }catch(e){} }
+
 /* ---------- подсчёт ---------- */
 function renderCount(M){
   const all = sorted();
@@ -361,8 +383,21 @@ function renderCount(M){
   const countable = p => M.items[p.id].restock || (M.items[p.id].base ?? 0) > 0 || M.items[p.id].bought > 0;
   // Поля заполняем фактом: прошлый подсчёт плюс закупки. Расчётным расходом нельзя —
   // иначе догадка приложения молча станет записанным подсчётом.
-  if(!S.count){ S.count = {}; for(const p of all) if(countable(p)) S.count[p.id] = Math.round(M.items[p.id].exact) }
+  if(!S.count){
+    S.count = {}; for(const p of all) if(countable(p)) S.count[p.id] = Math.round(M.items[p.id].exact);
+    const d = draftLoad(M.last?.id || null);
+    // накладываем только на позиции, которые и сейчас считаются: новые товары
+    // берут свежее заполнение, а исчезнувшие из подсчёта черновик не воскрешает
+    if(d){
+      for(const k of Object.keys(S.count)) if(d.count[k] != null) S.count[k] = d.count[k];
+      S.f.cCash = d.cash; S.f.cCard = d.card; S.f.cWho = d.who; S.f.amnesty = d.amnesty;
+      S.draftAt = d.at;
+    } else S.draftAt = null;
+  }
   let h = `<h2 class="sec">Подсчёт раз в 2 недели<em>${M.last ? "прошлый "+ddmm(M.last.date)+" · "+Math.floor(M.dSince)+" дн. назад" : ""}</em></h2>
+    ${S.draftAt ? `<div class="draft"><span>Продолжаем подсчёт, начатый ${
+        new Date(S.draftAt).toDateString() === new Date().toDateString() ? "" : ddmm(new Date(S.draftAt).toISOString()) + " "
+      }в ${new Date(S.draftAt).toTimeString().slice(0,5)}</span><button class="lnk" id="draftReset">начать заново</button></div>` : ""}
     <p class="note" style="margin:0 0 12px">Посчитай холодильник и полки вместе. Поля заполнены прошлым подсчётом плюс закупки — поправь на то, что видишь.</p><div class="panel">`;
   // кончившееся на сбыте не переспрашиваем: понадобится — заведут заново
   for(const cat of CATS) for(const p of all.filter(x => x.cat===cat && countable(x))){
@@ -672,6 +707,9 @@ document.addEventListener("click", async e => {
   if(e.target.closest("#fillNeed")){ for(const p of sorted()){ const n = S.M.items[p.id]?.need; if(n) S.buy[p.id] = n } render(); toast("Список перенесён — поправь по чеку"); return }
   const rf = e.target.closest("#refresh");
   if(e.target.id === "manualToggle"){ S.f.manual = !S.f.manual; render(); return }
+  if(e.target.id === "draftReset"){
+    draftDrop(); S.count = null; S.draftAt = null; S.f.cCash = S.f.cCard = ""; S.f.amnesty = false;
+    toast("Черновик сброшен"); render(); return }
   if(e.target.id === "parseAgain"){ parseSheet(); return }
   const rc = e.target.closest?.("[data-rcpt]");
   if(rc){
@@ -703,11 +741,12 @@ document.addEventListener("input", e => {
   if(["buySum","buyWho","buyWhere","cCash","cCard","cWho"].includes(i.id)) S.f[i.id] = i.value;
   if(i.id === "cAmnesty") S.f.amnesty = i.checked;
   if(i.id === "cCash" || i.id === "cCard") previewCount(S.M);
+  if(["cCash","cCard","cWho","cAmnesty"].includes(i.id) && S.tab === "count") draftSave();
 });
 addEventListener("scroll", () => $("#top").classList.toggle("stuck", scrollY > 6), {passive:true});
 
 function setVal(k,id,v){
-  if(k === "b"){ S.buy[id] = v; dock() } else { S.count[id] = v; previewCount(S.M) }
+  if(k === "b"){ S.buy[id] = v; dock() } else { S.count[id] = v; previewCount(S.M); draftSave() }
   const el = document.getElementById(k+"-"+id);
   if(el) el.classList.toggle("changed", k === "b" ? v > 0 : v !== Math.round(S.M.items[id].exact));
 }
@@ -833,7 +872,8 @@ async function saveCount(){
       amnesty: !!$("#cAmnesty")?.checked,
       frozen:{price:SALE, saleUnits:saleU, freeUnits:freeU, costSale:+cSale.toFixed(4),
               costWater:+cWater.toFixed(4), depSpent:+dep.toFixed(4)}}));
-    S.count = null; S.f.cCash = S.f.cCard = ""; toast("Подсчёт сохранён"); haptic("medium");
+    draftDrop(); S.draftAt = null;
+    S.count = null; S.f.cCash = S.f.cCard = ""; S.f.amnesty = false; toast("Подсчёт сохранён"); haptic("medium");
     S.tab = "hist"; document.querySelectorAll(".tab").forEach(x => x.setAttribute("aria-selected", x.dataset.tab === "hist")); render(); scrollTo(0,0);
   }catch(e){ toast("Не сохранилось: "+e.message); b.disabled = false }
 }
@@ -859,7 +899,7 @@ async function addProduct(){
    Нужен для сверки цифр приложения против эталонного пересчёта. */
 // Отладочный ход: без него окна вроде подтверждения чека нечем проверить глазами
 if(location.search.includes("debug=1"))
-  window.__hub = {S, model, render, parseSheet, prepParsed, get M(){ return S.M }};
+  window.__hub = {S, model, render, parseSheet, prepParsed, draftLoad, draftSave, draftDrop, renderCount, get M(){ return S.M }};
 
 /* Окно подтверждения разбора */
 function parseSheet(){

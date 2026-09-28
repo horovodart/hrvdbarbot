@@ -232,3 +232,8 @@ button.sec:active{opacity:.6}
 .parsing{display:flex;align-items:center;gap:10px;margin-top:10px;color:var(--dim);font-size:14px}
 .parsing i{width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--accent);
   border-radius:50%;display:inline-block;animation:spin .7s linear infinite}
+
+/* ---------- черновик подсчёта ---------- */
+.draft{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px;
+  padding:10px 12px;border-radius:12px;background:#EEF2FF;color:#2F4FE0;font-size:14px}
+.draft .lnk{margin:0;padding:0;color:#2F4FE0;white-space:nowrap}
