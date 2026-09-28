@@ -260,7 +260,7 @@ export function makeEnv(opts = {}) {
   const CacheService = { getScriptCache: () => cacheObj, getUserCache: () => cacheObj, getDocumentCache: () => cacheObj };
 
   /* Telegram вместо Диска: мок отвечает как api.telegram.org */
-  const drive = { files: new Map(), seq: 0, sent: [] };
+  const drive = { files: new Map(), seq: 0, sent: [], messages: [] };
   const ScriptApp = { getOAuthToken: () => 'тестовый-токен' };
 
   const UrlFetchApp = {
@@ -269,6 +269,14 @@ export function makeEnv(opts = {}) {
         getResponseCode: () => code, getContentText: () => text,
         getBlob: () => blob || Utilities.newBlob(text)
       });
+      if (url.indexOf('/sendMessage') >= 0) {
+        const p = JSON.parse(opts.payload);
+        if (String(p.chat_id) === 'заблокировал') return body(200, JSON.stringify({ ok:false, description:'Forbidden: bot was blocked by the user' }));
+        drive.messages.push(p);
+        return body(200, JSON.stringify({ ok: true, result: { message_id: drive.messages.length } }));
+      }
+      if (url.indexOf('/getChatMenuButton') >= 0)
+        return body(200, JSON.stringify({ ok: true, result: { type:'web_app', text:'Бар', web_app:{ url:'https://example.test/?v=abc' } } }));
       if (url.indexOf('/sendDocument') >= 0) {
         const p = opts.payload || {};
         if (!p.document) return body(200, JSON.stringify({ ok: false, description: 'нет файла' }));

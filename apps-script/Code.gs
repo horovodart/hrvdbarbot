@@ -135,6 +135,7 @@ function allowed(id, user){
 function handle(action, p, user){
   var lock = LockService.getScriptLock();
   if (action === 'parseReceipt') return parseReceipt(p.photo);   // чтение: замок не нужен
+  if (action === 'remindPlan') return remindPlan(new Date()).map(function(m){ return {kind:m.kind, text:m.text} });
   if (action === 'list'){
     // Замок нужен, только если чтение может что-то записать: первый запуск или
     // разъехавшийся сид. Иначе двое открывших приложение одновременно вставали в
@@ -550,6 +551,95 @@ function parseReceipt(photo){
   };
   data.usage = out.usage || null;
   return data;
+}
+
+/* ---------- напоминания от бота ----------
+   Раз в день по таймеру (ставится в редакторе скрипта: Триггеры → remindTick).
+   Только по фактам: срок — от даты прошлого подсчёта, тара — по тому, что
+   подсчёты показали выпитым после последней сдачи. Никаких прогнозов по
+   среднему расходу: напоминание приходит, когда цифра настоящая.
+   Каждое напоминание — один раз на своё состояние, повторов в тот же день нет. */
+var REMIND = {countDays: 14, countAgain: 21, tareEur: 10};
+
+function lastBy(list){ return list.slice().sort(function(a,b){ return a.date < b.date ? -1 : 1 }).pop() || null }
+function notDeleted(list){ return list.filter(function(r){ return !r.deleted }) }
+
+// залог в пустой таре, выпитый ПОСЛЕ последней сдачи — только по подсчётам
+function tareFacts(){
+  var counts = notDeleted(rows('counts')).sort(function(a,b){ return a.date < b.date ? -1 : 1 });
+  var buys = notDeleted(rows('purchases')), rets = notDeleted(rows('returns'));
+  var prods = {}; rows('products').forEach(function(p){ prods[p.id] = p });
+  var lastRet = (lastBy(rets) || {}).date || null;
+  var units = 0;
+  for (var i = 1; i < counts.length; i++) {
+    var a = counts[i-1], b = counts[i];
+    if (lastRet && b.date <= lastRet) continue;                 // период целиком до сдачи
+    var days = (new Date(b.date) - new Date(a.date)) / 864e5 || 1;
+    var share = !lastRet || a.date >= lastRet ? 1
+              : Math.max(0, Math.min(1, (new Date(b.date) - new Date(lastRet)) / 864e5 / days));
+    Object.keys(prods).forEach(function(id){
+      var dep = Number(prods[id].dep) || 0; if (!dep) return;
+      var A = (a.stock || {})[id], B = (b.stock || {})[id];
+      if (A == null || B == null) return;
+      var bought = 0;
+      buys.forEach(function(x){ if (x.date > a.date && x.date <= b.date) bought += Number((x.items || {})[id]) || 0 });
+      units += Math.max(0, A + bought - B) * share;
+    });
+  }
+  units = Math.round(units);
+  return {units: units, eur: Math.round(units * DEPOSIT_UNIT * 100) / 100, lastRet: lastRet,
+          lastCount: counts.length ? counts[counts.length-1] : null};
+}
+
+// что сейчас стоит отправить — без отправки, чтобы можно было посмотреть заранее
+function remindPlan(now){
+  now = now || new Date();
+  var props = PropertiesService.getScriptProperties();
+  var plan = [];
+  var last = lastBy(notDeleted(rows('counts')));
+  if (last) {
+    var d = Math.floor((now - new Date(last.date)) / 864e5);
+    var dd = last.date.slice(8,10) + '.' + last.date.slice(5,7);
+    if (d >= REMIND.countAgain && props.getProperty('REMIND_COUNT2') !== last.id)
+      plan.push({kind:'count2', key:'REMIND_COUNT2', val:last.id,
+        text:'Подсчёт не делали уже ' + d + ' дней — с ' + dd + '. Без него недобор и закупка считаются вслепую.'});
+    else if (d >= REMIND.countDays && props.getProperty('REMIND_COUNT') !== last.id)
+      plan.push({kind:'count', key:'REMIND_COUNT', val:last.id,
+        text:'Пора считать склад: прошлый подсчёт был ' + dd + ', прошло ' + d + ' дней.'});
+  }
+  var t = tareFacts();
+  var tkey = (t.lastRet || '-') + '|' + (t.lastCount ? t.lastCount.id : '-');
+  if (t.eur >= REMIND.tareEur && props.getProperty('REMIND_TARE') !== tkey)
+    plan.push({kind:'tare', key:'REMIND_TARE', val:tkey,
+      text:'Тары накопилось на ' + t.eur.toFixed(2).replace('.', ',') + ' € — ' + t.units +
+           ' бутылок и банок, по подсчёту. Самое время сдать.'});
+  return plan;
+}
+
+// кому: всем из листа команды — кто не нажимал «Старт» у бота, тому Telegram не даст написать
+function remindTo(){
+  var c = prop('REMIND_CHAT');
+  if (c) return [String(c).trim()];
+  return rows('team').map(function(r){ return String(r.tg_id || '').trim() }).filter(String);
+}
+
+function remindTick(){
+  var plan = remindPlan(new Date());
+  if (!plan.length) return {sent: 0};
+  var url = null;
+  try { url = tg('getChatMenuButton', {}).web_app.url } catch (e) {}   // свежий адрес, с версией
+  var props = PropertiesService.getScriptProperties(), sent = 0;
+  plan.forEach(function(m){
+    remindTo().forEach(function(chat){
+      try {
+        tg('sendMessage', {chat_id: chat, text: m.text,
+          reply_markup: url ? {inline_keyboard: [[{text: 'Открыть бар', web_app: {url: url}}]]} : undefined});
+        sent++;
+      } catch (e) { /* не нажимал «Старт» или заблокировал бота — пропускаем */ }
+    });
+    props.setProperty(m.key, m.val);        // запомнили: это состояние уже напоминали
+  });
+  return {sent: sent, kinds: plan.map(function(m){ return m.kind })};
 }
 
 function listAll(){

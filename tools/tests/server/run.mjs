@@ -1116,6 +1116,108 @@ test('delete работает для разрешённого листа', () =>
   assert.equal(env.lockCalls.held, 0);
 });
 
+G('16. напоминания от бота');
+
+// книга с одним товаром с залогом и управляемыми подсчётами — чтобы считать руками
+function remindBook(counts, returns) {
+  const sheets = bootedBook();
+  const H = (name) => sheets[name][0];
+  const row = (name, o) => H(name).map(c => (c in o ? (typeof o[c] === 'object' && o[c] !== null ? JSON.stringify(o[c]) : o[c]) : ''));
+  sheets.counts = [H('counts'), ...counts.map(c => row('counts', c))];
+  sheets.purchases = [H('purchases')];
+  sheets.returns = [H('returns'), ...(returns || []).map(r => row('returns', r))];
+  return sheets;
+}
+const day = n => new Date(Date.UTC(2026, 9, 1) + n * 864e5).toISOString();   // 01.10 + n дней
+
+test('подсчёт: на 13-й день молчим, на 14-й напоминаем', () => {
+  const { api } = newApp({ sheets: remindBook([{id:'c1', date: day(0), stock:{kozel05:10}}]),
+    props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
+  assert.equal(api.remindPlan(new Date(day(13))).length, 0, '13 дней — рано');
+  const plan = api.remindPlan(new Date(day(14)));
+  assert.equal(plan.length, 1);
+  assert.equal(plan[0].kind, 'count');
+  assert.match(plan[0].text, /14 дней/);
+});
+
+test('подсчёт: одно напоминание на 14-й, второе на 21-й — и всё', () => {
+  const { env, api } = newApp({ sheets: remindBook([{id:'c1', date: day(0), stock:{kozel05:10}}]),
+    props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
+  const kinds = n => api.remindPlan(new Date(day(n))).map(m => m.kind);
+  const send = n => { api.remindPlan(new Date(day(n))).forEach(m => env.props[m.key] = m.val) };
+  send(14);
+  assert.deepEqual(kinds(15), [], 'на следующий день не повторяем');
+  assert.deepEqual(kinds(21), ['count2'], 'через неделю — второе, построже');
+  send(21);
+  assert.deepEqual(kinds(30), [], 'дальше не надоедаем');
+});
+
+test('новый подсчёт сбрасывает счётчик напоминаний', () => {
+  const { env, api } = newApp({ sheets: remindBook([{id:'c1', date: day(0), stock:{kozel05:10}}]),
+    props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN, REMIND_COUNT: 'c1' } });
+  api.handle('addCount', { date: day(15), cash: 0, card: 0, stock:{kozel05:5} }, { id:'1', name:'Миша' });
+  assert.deepEqual(api.remindPlan(new Date(day(16))).map(m => m.kind), [], 'подсчёт свежий — тишина');
+  assert.deepEqual(api.remindPlan(new Date(day(29))).map(m => m.kind), ['count'], 'и через 14 дней от него — снова');
+});
+
+test('тара — только по подсчётам, без прогноза', () => {
+  // выпито 80 банок с залогом между подсчётами = 12,00 € — выше порога в 10 €
+  const { api } = newApp({ sheets: remindBook([
+    {id:'c1', date: day(0), stock:{kozel05:100}},
+    {id:'c2', date: day(10), stock:{kozel05:20}}
+  ]), props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
+  const t = api.tareFacts();
+  assert.equal(t.units, 80);
+  assert.equal(t.eur, 12);
+  const plan = api.remindPlan(new Date(day(11)));
+  assert.ok(plan.some(m => m.kind === 'tare' && /12,00/.test(m.text)), JSON.stringify(plan));
+});
+
+test('тара после сдачи обнуляется — напоминать не о чем', () => {
+  const { api } = newApp({ sheets: remindBook(
+    [{id:'c1', date: day(0), stock:{kozel05:100}}, {id:'c2', date: day(10), stock:{kozel05:20}}],
+    [{id:'r1', date: day(10), amount: 12, units: 80, toTill: true}]),
+    props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
+  assert.equal(api.tareFacts().units, 0, 'весь период до сдачи — уже сдано');
+  assert.ok(!api.remindPlan(new Date(day(11))).some(m => m.kind === 'tare'));
+});
+
+test('ниже порога — не беспокоим', () => {
+  const { api } = newApp({ sheets: remindBook([
+    {id:'c1', date: day(0), stock:{kozel05:100}}, {id:'c2', date: day(10), stock:{kozel05:50}}
+  ]), props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
+  assert.equal(api.tareFacts().eur, 7.5);
+  assert.ok(!api.remindPlan(new Date(day(11))).some(m => m.kind === 'tare'), '7,50 € — рано');
+});
+
+test('удалённый подсчёт в напоминаниях не участвует', () => {
+  const { api } = newApp({ sheets: remindBook([
+    {id:'c1', date: day(0), stock:{kozel05:100}},
+    {id:'cX', date: day(12), stock:{kozel05:0}, deleted: day(13)}
+  ]), props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
+  assert.equal(api.tareFacts().units, 0, 'удалённый подсчёт не создаёт «выпитого»');
+});
+
+test('отправка: всем из команды, с кнопкой в приложение, и не повторяет', () => {
+  const { env, api } = newApp({ sheets: remindBook([{id:'c1', date: day(-20), stock:{kozel05:10}}]),
+    props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
+  const team = api.rows('team').length;
+  const r = api.remindTick();
+  assert.equal(r.sent, team, 'по сообщению каждому в команде');
+  const m = env.drive.messages[0];
+  assert.equal(m.reply_markup.inline_keyboard[0][0].web_app.url, 'https://example.test/?v=abc',
+    'кнопка ведёт на свежий адрес с версией');
+  assert.equal(api.remindTick().sent, 0, 'второй запуск в тот же день — тишина');
+});
+
+test('кто заблокировал бота — пропускаем, остальным доходит', () => {
+  const sheets = remindBook([{id:'c1', date: day(-20), stock:{kozel05:10}}]);
+  sheets.team.push(sheets.team[0].map(c => c === 'tg_id' ? 'заблокировал' : c === 'role' ? 'admin' : c === 'name' ? 'X' : ''));
+  const { api } = newApp({ sheets, props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
+  const r = api.remindTick();
+  assert.equal(r.sent, api.rows('team').length - 1, 'один не получил, остальные получили');
+});
+
 G('15. порядок обхода полок');
 
 test('порядок пишется за один проход, а не по строке на товар', () => {
