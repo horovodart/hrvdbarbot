@@ -1007,7 +1007,16 @@ async function addProduct(){
    Нужен для сверки цифр приложения против эталонного пересчёта. */
 // Отладочный ход: без него окна вроде подтверждения чека нечем проверить глазами
 if(location.search.includes("debug=1"))
-  window.__hub = {S, model, render, parseSheet, prepParsed, draftLoad, draftSave, draftDrop, renderCount, shelfOrder, shelfSheet, get M(){ return S.M }};
+  window.__hub = {S, model, render, parseSheet, prepParsed, receiptDate, draftLoad, draftSave, draftDrop, renderCount, shelfOrder, shelfSheet, get M(){ return S.M }};
+
+/* Дата покупки — с чека. Закупка от 23.09, записанная 29.09, путала бы историю
+   и «почём брали». Будущую или нечитаемую дату не берём — тогда сегодня. */
+function receiptDate(iso){
+  const now = new Date();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(iso || "")) return now.toISOString();
+  const d = new Date(iso + "T12:00:00");
+  return isNaN(d) || d > now ? now.toISOString() : d.toISOString();
+}
 
 /* Окно подтверждения разбора */
 function parseSheet(){
@@ -1031,6 +1040,7 @@ function parseSheet(){
   bg.innerHTML = `<div class="sheet"><div class="grab"><i></i></div><div class="body">
     <h3>Чек разобран</h3>
     <p class="note" style="margin:2px 0 12px">${esc(P.shop||"магазин не распознан")}${P.date?" · "+esc(P.date):""}${P.total!=null?" · итог "+eur(P.total):""}${P.skipped?` · пропущено залоговых строк: ${P.skipped}`:""}</p>
+    ${S.M?.last && receiptDate(P.date) < S.M.last.date ? `<p class="warn">Чек от ${esc(P.date)} — раньше прошлого подсчёта ${ddmm(S.M.last.date)}. Закупка попадёт в уже закрытый период и изменит его расход.</p>` : ""}
     ${P.check && P.check.fits === false ? `<p class="warn">Сумма позиций ${eur(P.check.sum)} не сходится с итогом чека ${eur(P.check.total)}. Проверь внимательно.</p>` : ""}
     ${bad.length ? `<h4 class="psec">Требует внимания · ${bad.length}</h4>${bad.map(row).join("")}` : `<p class="note" style="margin:0 0 12px">Вопросов нет — всё сопоставилось.</p>`}
     ${good.length ? `<details class="fold"><summary>Ещё ${good.length} ${plural(good.length,"позиция","позиции","позиций")} · всё понятно</summary>${good.map(row).join("")}</details>` : ""}
@@ -1063,7 +1073,7 @@ function parseSheet(){
     }
     e.target.disabled = true;
     try{
-      await apply(API.addPurchase({date:new Date().toISOString(), items, prices, learn,
+      await apply(API.addPurchase({date: receiptDate(P.date), items, prices, learn,
         total: P.total ?? (num($("#buySum")?.value) || null),
         by: $("#buyWho")?.value.trim() || null, source: P.shop || null, photo: S.f.photo || null}));
       S.buy = {}; S.f.photo = null; S.f.parsed = null; S.f.buySum = "";
