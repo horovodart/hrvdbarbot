@@ -497,7 +497,7 @@ function renderHist(M){
         ${foot("purchases", p, p.by || "")}</div>`;
     } else if(e.t === "ret"){ const x = e.x;
       h += `<div class="panel pad"><div class="h"><b>Сдача тары ${ddmm(x.date)}</b><span class="num">${eur(+x.amount||0)}</span></div>
-        <p class="note" style="margin:0">${esc(x.units||0)} шт · ${x.toTill ? "деньги в кассу" : "мимо кассы"}${x.note ? " · " + esc(x.note) : ""}</p>
+        <p class="note" style="margin:0">${esc(x.units||0)} шт${x.toTill ? " · вычтено из подсчёта" : ""}${x.note ? " · " + esc(x.note) : ""}</p>
         ${foot("returns", x, x.by || "")}</div>`;
     } else {
       h += `<div class="panel pad"><div class="h"><b>Опорный подсчёт ${ddmm(e.c.date)}</b></div>
@@ -539,7 +539,6 @@ function editSheet(col, x){
       <p class="note" style="margin:8px 0 0">Остатки в сохранённом подсчёте не правятся: деньги периода по ним уже посчитаны и заморожены.</p>`;
   } else {
     body = `<div class="fields">${f("eAmount","Сумма, €",x.amount,"decimal")}${f("eUnits","Штук",x.units,"numeric")}</div>
-      <label class="chk"><input type="checkbox" id="eTill" ${x.toTill?"checked":""}><span>Деньги положил в кассу</span></label>
       <div class="fields">${f("eNote","Заметка",x.note)}</div>`;
   }
   const bg = document.createElement("div");
@@ -568,7 +567,7 @@ function editSheet(col, x){
     } else {
       if(!(num(v("eAmount")) > 0)) return toast("Впиши сумму");
       patch = {amount:num(v("eAmount")), units:Math.max(0, parseInt(v("eUnits"))||0),
-               toTill:!!bg.querySelector("#eTill")?.checked, note:v("eNote")||null};
+               note:v("eNote")||null};
     }
     e.target.disabled = true;
     try{ await apply(API.update(col, x.id, patch)); toast("Поправлено"); haptic("medium"); close() }
@@ -686,7 +685,7 @@ function tareSheet(M){
         <div class="field" style="min-width:100%"><label for="tNote">Примечание</label><input id="tNote" placeholder="необязательно"></div>
       </div>
       <p class="note" id="tCalc" style="margin:10px 0 0">Это <b>0 шт</b> тары.</p>
-      <label class="chk"><input type="checkbox" id="tTill" checked><span><b>Деньги положил в кассу</b> — тогда приложение не посчитает их донатами за напитки</span></label>
+      <p class="note" style="margin:6px 0 0">Деньги за тару — в сейф. В коробку сбора они не попадают и на недобор не влияют.</p>
       <div class="blk"><h4>Тара</h4>
         <dl class="recon num">
           <dt>Сдано за всё время</dt><dd>${M.tare.units} шт · ${eur(M.tare.amount)}</dd>
@@ -713,7 +712,7 @@ function tareSheet(M){
     const btn = bg.querySelector("#tSave"); btn.disabled = true;
     try{
       await apply(API.addReturn({date:new Date().toISOString(), amount, units:units(amount),
-        toTill:bg.querySelector("#tTill").checked, by:bg.querySelector("#tWho").value.trim()||null,
+        toTill:false, by:bg.querySelector("#tWho").value.trim()||null,
         note:bg.querySelector("#tNote").value.trim()||null}));
       toast(`Записал: ${units(amount)} шт на ${eur(amount)}`); haptic("medium"); close();
     }catch(e){ toast("Не сохранилось: "+e.message); btn.disabled = false }
@@ -761,8 +760,8 @@ function moneySheet(r){
       <div class="blk"><h4>Как это считается</h4><p class="note" style="margin:0">
         Недобор — только по платным напиткам: сколько должны были занести против того, что занесли.
         Вода бесплатная, деньги за неё не вернутся никогда, поэтому она стоит отдельной строкой расхода, а не в недоборе.
-        Залог за тару в расход не идёт — это возвратные деньги, они лежат в пустой таре:
-        если сдачу тары отметить во вкладке «Закупка», её сумма вычтется из кассы и не сойдёт за донаты.</p></div>
+        Залог за тару в расход не идёт — это возвратные деньги, они лежат в пустой таре.
+        Деньги за сдачу тары идут в сейф, а не в коробку сбора, поэтому в «пришло» не попадают.</p></div>
       <button class="btn ghost" id="mClose" style="margin-top:16px">Закрыть</button>
     </div></div>`;
   document.body.appendChild(bg);
