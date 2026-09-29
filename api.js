@@ -23,7 +23,12 @@ window.API = (function(){
   // Запрос не должен висеть вечно: раньше запись закупки шла шесть минут, и кнопка
   // так и оставалась бледной. По таймауту — повтор с тем же номером запроса,
   // а сервер по номеру не заведёт дубль. Фото грузится дольше — ему больше времени.
-  const LIMIT = {uploadReceipt: 150000, parseReceipt: 90000};
+  const LIMIT = {uploadReceipt: 150000, parseReceipt: 90000, getReceipt: 25000};   // чек из кэша — секунды; завис — переспросить
+  const SHAPE = {
+    list: d => !!(d && d.products),
+    getReceipt: d => !!(d && typeof d.data === "string" && d.data.length > 0 && /^image\//.test(d.mime || "")),
+    uploadReceipt: d => !!(d && d.receipt)
+  };
   async function once(action, payload){
     const ctl = typeof AbortController === "function" ? new AbortController() : null;
     const tm = ctl ? setTimeout(() => ctl.abort(), LIMIT[action] || 60000) : null;
@@ -47,7 +52,13 @@ window.API = (function(){
     try { j = JSON.parse(t) }
     catch(e){ throw flaky("сервер ответил не по делу") }
     if(!j.ok) throw new Error(j.error || "Ошибка сервера");   // ошибка по делу — повторять нечего
-    return j.data;
+    // Перенаправление Google изредка приносит ответ на другой запрос — например,
+    // служебное «живой» вместо фото чека. Отдать его дальше нельзя: битая картинка
+    // легла бы в телефон навсегда. Такой ответ — тоже повод повторить.
+    const d = j.data;
+    if(d && d.alive === true && d.ts) throw flaky("ответ не на тот запрос");
+    if(SHAPE[action] && !SHAPE[action](d)) throw flaky("ответ не на тот запрос");
+    return d;
   }
 
   // Номер попытки сохранить. Генерируем ОДИН раз на действие человека, а не на

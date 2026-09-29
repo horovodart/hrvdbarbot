@@ -766,5 +766,26 @@ console.log("\n— 18. фото чека: один запрос, дальше и
   eq("18.6 тип картинки сохранился", c.type, "image/jpeg");
 }
 
+/* ══════════════ 19. Ответ не на тот запрос ══════════════ */
+console.log("\n— 19. чужой ответ от Google не выдаётся за фото —");
+{
+  const vmMod = await import("node:vm");
+  const answers = [
+    {ok:true, data:{alive:true, synced:false, ts:"2026-09-29T22:57:43.046Z"}},   // так бывает вживую
+    {ok:true, data:{mime:"image/jpeg", data:"AAAA"}}
+  ];
+  let calls = 0;
+  const sb = { window:{}, JSON, Object, Date, Math, Promise, setTimeout, clearTimeout, AbortController,
+    localStorage:{ getItem:()=>null, setItem:()=>{}, removeItem:()=>{} },
+    fetch: async () => { const a = answers[Math.min(calls++, answers.length - 1)];
+      return { ok:true, text: async () => JSON.stringify(a) } } };
+  sb.window.HUB_CONFIG = { API:"https://example.test/exec" };
+  vmMod.createContext(sb);
+  vmMod.runInContext(readFileSync(new URL("../../../api.js", import.meta.url), "utf8"), sb);
+  const f = await sb.window.API.receipt("p1");
+  eq("19.1 служебный ответ не принят — переспросили", calls, 2);
+  eq("19.2 наверх ушло настоящее фото", f.data, "AAAA");
+}
+
 console.log(`\nпрошло ${pass} из ${pass + fail}`);
 process.exit(fail ? 1 : 0);
