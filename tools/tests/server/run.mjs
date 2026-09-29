@@ -1116,6 +1116,57 @@ test('getReceipt у закупки без фото — понятная ошиб
   assert.equal(env.lockCalls.held, 0, 'замок не остался висеть');
 });
 
+test('чек смотрят без замка и второй раз — без похода в Telegram', () => {
+  // Просмотр стоял в очереди за записями и каждый раз качал файл заново: 6–14 секунд.
+  const { env, api } = readyApp();
+  const out = api.handle('addPurchase', { total: 61, items:{aro05:1}, photo: PNG1 }, { id:'1', name:'Миша' });
+  const id = Object.entries(out.purchases).find(([,x]) => x.total === 61)[0];
+  const locks = env.lockCalls.waitLock;
+  env.cacheStore.clear();                               // холодный кэш: как после шести часов
+  const a = api.handle('getReceipt', { id }, { id:'1', name:'Миша' });
+  const b = api.handle('getReceipt', { id }, { id:'1', name:'Миша' });
+  assert.equal(env.lockCalls.waitLock, locks, 'просмотр не брал замок');
+  assert.equal(env.drive.downloads, 1, 'из Telegram качали один раз, второй — из кэша');
+  assert.equal('data:' + b.mime + ';base64,' + b.data, PNG1, 'из кэша вернулось то же самое');
+  assert.equal(a.mime, 'image/jpeg');
+});
+
+test('только что загруженный чек открывается сразу из кэша', () => {
+  const { env, api } = readyApp();
+  const up = api.handle('uploadReceipt', { photo: PNG1, date:'2026-09-23' }, { id:'1', name:'Миша' });
+  const out = api.handle('addPurchase', { total: 62, items:{aro05:1}, receipt: up.receipt }, { id:'1', name:'Миша' });
+  const id = Object.entries(out.purchases).find(([,x]) => x.total === 62)[0];
+  const got = api.handle('getReceipt', { id }, { id:'1', name:'Миша' });
+  assert.equal(env.drive.downloads, 0, 'в Telegram за ним не ходили');
+  assert.equal('data:' + got.mime + ';base64,' + got.data, PNG1);
+});
+
+test('большое фото ложится в кэш кусками и собирается байт в байт', () => {
+  // настоящий чек — 370 КБ, а в один ключ кэша влезает 100 КБ
+  const { env, api } = readyApp();
+  const big = Buffer.alloc(400 * 1024); for (let i = 0; i < big.length; i++) big[i] = (i * 7919) & 0xff;
+  const photo = 'data:image/jpeg;base64,' + big.toString('base64');
+  const out = api.handle('addPurchase', { total: 63, items:{aro05:1}, photo }, { id:'1', name:'Миша' });
+  const id = Object.entries(out.purchases).find(([,x]) => x.total === 63)[0];
+  const got = api.handle('getReceipt', { id }, { id:'1', name:'Миша' });
+  assert.equal(env.drive.downloads, 0, 'взяли из кэша');
+  assert.equal(got.data, big.toString('base64'), 'собралось без потерь');
+  assert.ok([...env.cacheStore.keys()].filter(k => k.startsWith('rc:')).length >= 6, 'лежит кусками');
+});
+
+test('кусок чека выпал из кэша — качаем заново, а не отдаём обрезок', () => {
+  const { env, api } = readyApp();
+  const big = Buffer.alloc(300 * 1024, 5);
+  const photo = 'data:image/jpeg;base64,' + big.toString('base64');
+  const out = api.handle('addPurchase', { total: 64, items:{aro05:1}, photo }, { id:'1', name:'Миша' });
+  const id = Object.entries(out.purchases).find(([,x]) => x.total === 64)[0];
+  const piece = [...env.cacheStore.keys()].find(k => /^rc:.*:1$/.test(k));
+  env.cacheStore.delete(piece);
+  const got = api.handle('getReceipt', { id }, { id:'1', name:'Миша' });
+  assert.equal(env.drive.downloads, 1, 'пошли в Telegram');
+  assert.equal(got.data, big.toString('base64'), 'и отдали целое фото');
+});
+
 test('производительность: обращений к листу на один list', () => {
   const { env, api } = readyApp();
   env.stats.reset();

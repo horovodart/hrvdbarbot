@@ -219,6 +219,11 @@ button.sec:active{opacity:.6}
 .sheet-bg.photo{align-items:center;justify-content:center;padding:18px}
 .photowrap{max-width:100%;max-height:90vh;display:flex;flex-direction:column;gap:12px;align-items:stretch}
 .photowrap img{max-width:100%;max-height:78vh;object-fit:contain;border-radius:14px;background:#fff}
+.sheet-bg.photo.loading .photowrap img{display:none}
+.sheet-bg.photo:not(.loading) .pload{display:none}
+.pload{min-width:220px;min-height:160px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;border-radius:14px;background:var(--card, #fff);color:var(--ink-2);font-size:15px}
+.pload .ring{width:28px;height:28px;border-radius:50%;border:3px solid currentColor;border-right-color:transparent;animation:pspin .8s linear infinite;opacity:.6}
+@keyframes pspin{to{transform:rotate(360deg)}}
 
 /* ---------- подтверждение разбора чека ---------- */
 .psec{margin:16px 0 8px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}

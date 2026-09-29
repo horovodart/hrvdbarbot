@@ -254,13 +254,20 @@ export function makeEnv(opts = {}) {
   const cacheCalls = { get: 0, put: 0, remove: 0, hits: 0 };
   const cacheObj = {
     get(k) { cacheCalls.get++; const v = cacheStore.has(k) ? cacheStore.get(k) : null; if (v != null) cacheCalls.hits++; return v },
-    put(k, v, ttl) { cacheCalls.put++; cacheStore.set(k, String(v)); return null },
+    put(k, v, ttl) {
+      cacheCalls.put++;
+      // как в Apps Script: больше 100 КБ в одно значение не кладётся
+      if (String(v).length > 100 * 1024) throw new Error('Argument too large: value');
+      cacheStore.set(k, String(v)); return null
+    },
+    getAll(keys) { const o = {}; for (const k of keys) { const v = cacheObj.get(k); if (v != null) o[k] = v } return o },
+    putAll(map, ttl) { for (const k of Object.keys(map)) cacheObj.put(k, map[k], ttl); return null },
     remove(k) { cacheCalls.remove++; cacheStore.delete(k); return null }
   };
   const CacheService = { getScriptCache: () => cacheObj, getUserCache: () => cacheObj, getDocumentCache: () => cacheObj };
 
   /* Telegram вместо Диска: мок отвечает как api.telegram.org */
-  const drive = { files: new Map(), seq: 0, sent: [], messages: [] };
+  const drive = { files: new Map(), seq: 0, sent: [], messages: [], downloads: 0 };
   const ScriptApp = { getOAuthToken: () => 'тестовый-токен' };
 
   const UrlFetchApp = {
@@ -298,6 +305,7 @@ export function makeEnv(opts = {}) {
         const id = url.split('/photos/')[1].replace('.jpg', '');
         const f = drive.files.get(id);
         if (!f) return body(404, 'нет файла');
+        drive.downloads++;
         return body(200, '', f.blob);
       }
       return body(404, JSON.stringify({ ok: false, description: 'мок такого не умеет: ' + url }));

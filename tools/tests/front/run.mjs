@@ -741,5 +741,30 @@ console.log("\n— 10. показываемый остаток не убывае
      "флаг не должен опираться на прогноз");
 }
 
+/* ══════════════ 18. Чек открывается из телефона ══════════════ */
+console.log("\n— 18. фото чека: один запрос, дальше из памяти —");
+{
+  const { hub, sandbox } = loadHub();
+  sandbox.fetch = globalThis.fetch;                  // data:-ссылки node читает сам
+  let calls = 0, failNext = false;
+  const JPG = Buffer.from("фото чека").toString("base64");
+  sandbox.API.receipt = async id => { calls++; await new Promise(r => setTimeout(r, 20));
+    if(failNext){ failNext = false; throw new Error("сеть") } return {mime:"image/jpeg", data:JPG} };
+  const p = {id:"p1", receipt:"tgfile-1"};
+  hub.S.purchases = [p];
+  const [a, b] = await Promise.all([hub.rcptFetch(p), hub.rcptFetch(p)]);
+  eq("18.1 два нажатия подряд — один запрос к серверу", calls, 1);
+  ok("18.2 оба получили картинку", a && b && a.size > 0 && a === b);
+  await hub.rcptFetch(p);
+  eq("18.3 повторный просмотр — без сервера", calls, 1);
+  const q = {id:"p2", receipt:"tgfile-2"};
+  failNext = true;
+  let err = null; try{ await hub.rcptFetch(q) }catch(e){ err = e }
+  ok("18.4 ошибка сети доходит до человека", err && /сеть/.test(err.message));
+  const c = await hub.rcptFetch(q);
+  ok("18.5 после ошибки следующая попытка снова идёт на сервер", calls === 3 && c.size > 0, `запросов ${calls}`);
+  eq("18.6 тип картинки сохранился", c.type, "image/jpeg");
+}
+
 console.log(`\nпрошло ${pass} из ${pass + fail}`);
 process.exit(fail ? 1 : 0);

@@ -149,6 +149,9 @@ function handle(action, p, user){
     if (!(p.rid && ridSeen(String(p.rid).slice(0, 64)))) p.receipt = saveReceipt(p.photo, 'чек ' + String(p.date || '').slice(0,10));
     delete p.photo;
   }
+  // Просмотр чека — чтение: ни замка, ни похода в таблицу, если склад в кэше.
+  // Раньше он стоял в очереди за записями и каждый раз качал файл из Telegram.
+  if (action === 'getReceipt') return getReceipt(p.id);
   if (action === 'remindPlan') return remindPlan(new Date()).map(function(m){ return {kind:m.kind, text:m.text, to:remindTo(m.kind).length} });
   if (action === 'tareNow') return tareForecast(new Date());   // для сверки с приложением в дымовом тесте
   if (action === 'list'){
@@ -273,10 +276,6 @@ function handle(action, p, user){
       clean.edited = new Date().toISOString();
       clean.editedBy = who || '';
       patch(p.col, p.id, clean);
-    } else if (action === 'getReceipt'){
-      var buy = rows('purchases').filter(function(r){ return r.id === p.id })[0];
-      if (!buy) throw new Error('Закупка не найдена');
-      return readReceipt(buy.receipt);
     } else throw new Error('Неизвестное действие: ' + action);
     ridRemember(rid);
     dropListCache();
@@ -383,7 +382,52 @@ function saveReceipt(photo, caption){
     document: Utilities.newBlob(bytes, mime, 'чек.' + ext)
   }, true);
   if (!res.document || !res.document.file_id) throw new Error('Telegram не вернул файл');
+  // что только что загрузили, то первым и откроют — кладём в кэш сразу
+  receiptRemember(res.document.file_id, {mime: mime, data: m[2], name: 'чек.' + ext});
   return res.document.file_id;
+}
+
+function getReceipt(id){
+  var list = cacheGet();
+  var buy = list && list.purchases && list.purchases[id];
+  if (!buy) buy = rows('purchases').filter(function(r){ return r.id === id })[0];
+  if (!buy) throw new Error('Закупка не найдена');
+  return receiptCached(buy.receipt);
+}
+
+/* Кэш фото чека. Сам файл в Telegram не меняется никогда, а тянуть его оттуда
+   на каждый просмотр — это секунды. Кэш скрипта держит до 100 КБ в одном ключе,
+   поэтому фото лежит кусками плюс заголовок, где записано, сколько их. */
+var RCPT_TTL = 21600, RCPT_CHUNK = 95000;
+
+function receiptKey(fileId){ return 'rc:' + String(fileId).slice(-200) }
+
+function receiptRemember(fileId, f){
+  try {
+    var key = receiptKey(fileId), n = Math.ceil(f.data.length / RCPT_CHUNK), put = {};
+    if (n > 40) return;                                   // гигантское фото — живём без кэша
+    for (var i = 0; i < n; i++) put[key + ':' + i] = f.data.slice(i * RCPT_CHUNK, (i + 1) * RCPT_CHUNK);
+    var cache = CacheService.getScriptCache();
+    cache.putAll(put, RCPT_TTL);
+    cache.put(key, JSON.stringify({n: n, mime: f.mime, name: f.name || ''}), RCPT_TTL);   // заголовок последним
+  } catch (e) {}
+}
+
+function receiptCached(fileId){
+  if (!fileId) throw new Error('У этой закупки нет фото чека');
+  try {
+    var cache = CacheService.getScriptCache(), key = receiptKey(fileId), head = cache.get(key);
+    if (head) {
+      var h = JSON.parse(head), keys = [];
+      for (var i = 0; i < h.n; i++) keys.push(key + ':' + i);
+      var parts = cache.getAll(keys), data = '';
+      for (var j = 0; j < keys.length; j++) { if (!parts[keys[j]]) { data = null; break } data += parts[keys[j]] }
+      if (data) return {mime: h.mime, data: data, name: h.name};
+    }
+  } catch (e) {}                                          // кусок выпал из кэша — просто качаем заново
+  var f = readReceipt(fileId);
+  receiptRemember(fileId, f);
+  return f;
 }
 
 function readReceipt(id){

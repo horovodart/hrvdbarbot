@@ -769,7 +769,7 @@ function render(){
   if(S.tab === "menu")  v.innerHTML = renderMenu(M);
   if(S.tab === "buy")   v.innerHTML = renderBuy(M);
   if(S.tab === "count"){v.innerHTML = renderCount(M); previewCount(M)}
-  if(S.tab === "hist")  v.innerHTML = renderHist(M);
+  if(S.tab === "hist"){ v.innerHTML = renderHist(M); warmReceipt() }
   dock();
 }
 function dock(){
@@ -807,16 +807,7 @@ document.addEventListener("click", async e => {
     toast("Черновик сброшен"); render(); return }
   if(e.target.id === "parseAgain"){ parseSheet(); return }
   const rc = e.target.closest?.("[data-rcpt]");
-  if(rc){
-    const id = rc.dataset.rcpt, was = rc.textContent;
-    rc.textContent = "загружаю…"; rc.disabled = true;
-    try{
-      const f = await API.receipt(id);
-      showReceipt(`data:${f.mime};base64,${f.data}`);
-    }catch(err){ toast("Не вышло: "+err.message) }
-    rc.textContent = was; rc.disabled = false;
-    return;
-  }
+  if(rc){ openReceipt(rc.dataset.rcpt); return }
   if(rf){ rf.classList.add("spin"); try{ await apply(API.list(true)); toast("Обновлено") }catch(err){ toast("Не вышло: "+err.message) } rf.classList.remove("spin"); return }
   const ed = e.target.closest("[data-edit]");
   if(ed){
@@ -1014,7 +1005,7 @@ async function addProduct(){
    Нужен для сверки цифр приложения против эталонного пересчёта. */
 // Отладочный ход: без него окна вроде подтверждения чека нечем проверить глазами
 if(location.search.includes("debug=1"))
-  window.__hub = {S, model, render, parseSheet, prepParsed, receiptDate, mergeLines, draftLoad, draftSave, draftDrop, renderCount, shelfOrder, shelfSheet, get M(){ return S.M }};
+  window.__hub = {S, model, render, rcptFetch, parseSheet, prepParsed, receiptDate, mergeLines, draftLoad, draftSave, draftDrop, renderCount, shelfOrder, shelfSheet, get M(){ return S.M }};
 
 /* Фото — отдельным шагом до записи: сама запись после этого занимает секунды.
    Кнопка всё время показывает, что сейчас идёт, — иначе кажется, что зависло. */
@@ -1022,7 +1013,10 @@ async function withPhoto(btn, date){
   if(!S.f.photo) return null;
   if(btn) btn.textContent = "Загружаю фото…";
   const r = await API.uploadReceipt(S.f.photo, date);
-  return r && r.receipt || null;
+  const fid = r && r.receipt || null;
+  // своё фото у нас уже есть — кладём в телефон, чтобы открывалось без сети
+  if(fid) try{ await rcptPut(fid, await dataBlob(S.f.photo)) }catch(e){}
+  return fid;
 }
 function goHist(){
   S.tab = "hist";
@@ -1191,14 +1185,66 @@ function sortable(list, scroller){
   list.addEventListener("pointercancel", end);
 }
 
-function showReceipt(src){
+/* Фото чека. Файл после загрузки не меняется никогда, поэтому однажды открытый
+   чек лежит в телефоне и дальше открывается мгновенно. Окно открываем сразу —
+   пусть человек видит, что чек грузится, а не жмёт ссылку второй раз. */
+const RCPT_CACHE = "hub-receipts-v1";
+const rcptMem = new Map();                                  // если хранилище браузера недоступно
+const rcptUrl = fid => "/__receipt/" + encodeURIComponent(fid);
+async function rcptGet(fid){
+  if(rcptMem.has(fid)) return rcptMem.get(fid);
+  try{ const r = await (await caches.open(RCPT_CACHE)).match(rcptUrl(fid)); if(r){ const b = await r.blob(); rcptMem.set(fid, b); return b } }catch(e){}
+  return null;
+}
+async function rcptPut(fid, blob){
+  if(!fid || !blob) return;
+  rcptMem.set(fid, blob);
+  try{ await (await caches.open(RCPT_CACHE)).put(rcptUrl(fid), new Response(blob, {headers:{"Content-Type": blob.type || "image/jpeg"}})) }catch(e){}
+}
+const dataBlob = async src => (await fetch(src)).blob();
+const rcptLoading = new Map();                              // один запрос на чек, сколько ни жми
+function rcptFetch(p){
+  if(!rcptLoading.has(p.receipt)) rcptLoading.set(p.receipt, (async () => {
+    try{
+      const hit = await rcptGet(p.receipt);
+      if(hit) return hit;
+      const f = await API.receipt(p.id);
+      const b = await dataBlob(`data:${f.mime};base64,${f.data}`);
+      await rcptPut(p.receipt, b);
+      return b;
+    } finally { rcptLoading.delete(p.receipt) }
+  })());
+  return rcptLoading.get(p.receipt);
+}
+// Свежий чек почти наверняка откроют — подтягиваем его заранее, пока смотрят историю.
+let rcptWarm = false;
+function warmReceipt(){
+  if(rcptWarm || !API.live()) return; rcptWarm = true;
+  const p = [...S.purchases].filter(x => x.receipt).sort((a,b) => a.date < b.date ? 1 : -1)[0];
+  if(p) setTimeout(() => rcptFetch(p).catch(() => {}), 800);
+}
+async function openReceipt(id){
+  const p = S.purchases.find(x => x.id === id);
+  if(!p?.receipt) return;
+  const {bg, img, close} = showReceipt();
+  try{
+    const b = await rcptFetch(p);
+    if(!bg.isConnected) return;
+    const u = URL.createObjectURL(b);
+    img.onload = () => bg.classList.remove("loading");
+    img.src = u;
+    bg.addEventListener("closed", () => URL.revokeObjectURL(u), {once:true});
+  }catch(err){ close(); toast("Не вышло открыть чек: "+err.message) }
+}
+function showReceipt(){
   const bg = document.createElement("div");
-  bg.className = "sheet-bg photo";
-  bg.innerHTML = `<div class="photowrap"><img src="${src}" alt="Чек"><button class="btn ghost" id="pClose">Закрыть</button></div>`;
+  bg.className = "sheet-bg photo loading";
+  bg.innerHTML = `<div class="photowrap"><div class="pload"><span class="ring"></span>Загружаю чек…</div><img alt="Чек"><button class="btn ghost" id="pClose">Закрыть</button></div>`;
   document.body.appendChild(bg);
-  const close = () => { bg.remove(); TG?.BackButton?.offClick(close); TG?.BackButton?.hide() };
+  const close = () => { bg.remove(); bg.dispatchEvent(new Event("closed")); TG?.BackButton?.offClick(close); TG?.BackButton?.hide() };
   bg.addEventListener("click", ev => { if(ev.target === bg || ev.target.id === "pClose") close() });
   TG?.BackButton?.show(); TG?.BackButton?.onClick(close);
+  return {bg, img: bg.querySelector("img"), close};
 }
 
 /* ---------- старт ---------- */
