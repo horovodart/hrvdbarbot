@@ -132,9 +132,23 @@ function allowed(id, user){
 
 /* ---------------- действия ---------------- */
 
+// Замеры по шагам: в журнале выполнений видно, на чём тормозит запись
+var T0 = 0;
+function tick(what){ try { console.log((Date.now() - T0) + ' мс · ' + what) } catch (e) {} }
+
 function handle(action, p, user){
+  T0 = Date.now();
   var lock = LockService.getScriptLock();
   if (action === 'parseReceipt') return parseReceipt(p.photo);   // чтение: замок не нужен
+  // Фото чека грузим ДО замка на запись. Раньше загрузка шла внутри, и если
+  // Telegram тормозил, замок держался минутами: запись закупки шла шесть минут,
+  // а все остальные — удаление, правка — стояли в очереди и отваливались.
+  if (action === 'uploadReceipt') return {receipt: saveReceipt(p.photo, 'чек ' + String(p.date || '').slice(0,10))};
+  if (action === 'addPurchase' && p.photo && !p.receipt) {
+    // старое приложение ещё шлёт фото прямо в закупку — грузим тоже до замка
+    if (!(p.rid && ridSeen(String(p.rid).slice(0, 64)))) p.receipt = saveReceipt(p.photo, 'чек ' + String(p.date || '').slice(0,10));
+    delete p.photo;
+  }
   if (action === 'remindPlan') return remindPlan(new Date()).map(function(m){ return {kind:m.kind, text:m.text, to:remindTo(m.kind).length} });
   if (action === 'tareNow') return tareForecast(new Date());   // для сверки с приложением в дымовом тесте
   if (action === 'list'){
@@ -151,6 +165,7 @@ function handle(action, p, user){
     try { dropListCache(); return listCached(true) } finally { lock.releaseLock() }
   }
   lock.waitLock(30000);
+  tick('замок взят · ' + action);
   try {
     var who = user ? user.name : null;
     var rid = p && p.rid ? String(p.rid).slice(0, 64) : null;
@@ -159,13 +174,16 @@ function handle(action, p, user){
     if (action === 'addPurchase'){
       ensureCols('purchases');                 // без этого receipt и prices молча пропадают
       var pid = uid('p');
-      var receipt = p.photo ? saveReceipt(p.photo, 'чек ' + (p.date || '').slice(0,10) + ' ' + pid) : '';
+      var receipt = p.receipt ? String(p.receipt).slice(0, 200) : '';   // фото уже загружено до замка
       // Цены с чека — главный смысл загрузки: по ним обновляется цена закупки,
       // а в карточке видно, что и с чего на что поменялось.
-      var prices = {}, moved = {};
-      if (p.prices && typeof p.prices === 'object') {
-        var prod = {};
+      var prices = {}, moved = {}, upd = {};
+      var prod = {};
+      if ((p.prices && typeof p.prices === 'object') || (p.learn && p.learn.length)) {
+        ensureCols('products');
         rows('products').forEach(function(r){ prod[r.id] = r });
+      }
+      if (p.prices && typeof p.prices === 'object') {
         Object.keys(p.prices).forEach(function(k){
           var np = Number(p.prices[k]);
           if (!isFinite(np) || np <= 0 || !prod[k]) return;
@@ -173,23 +191,20 @@ function handle(action, p, user){
           prices[k] = np;
           if (was == null || Math.abs(was - np) >= 0.005) {
             moved[k] = {was: was, now: np};
-            patch('products', k, {cost: np});
+            (upd[k] = upd[k] || {}).cost = np;
           }
         });
       }
       // Словарь: что человек подтвердил, то и запоминаем за товаром. Второй чек
       // из того же магазина разберётся почти без правок.
       if (p.learn && p.learn.length) {
-        ensureCols('products');
-        var byId = {};
-        rows('products').forEach(function(r){ byId[r.id] = r });
         var grouped = {};
         p.learn.forEach(function(x){
-          if (!x || !x.id || !x.name || !byId[x.id]) return;
+          if (!x || !x.id || !x.name || !prod[x.id]) return;
           (grouped[x.id] = grouped[x.id] || []).push(x);
         });
         Object.keys(grouped).forEach(function(id){
-          var list = byId[id].aliases;
+          var list = prod[id].aliases;
           if (!list || typeof list.length !== 'number') list = [];
           grouped[id].forEach(function(x){
             var name = String(x.name).slice(0, 80), shop = x.shop ? String(x.shop).slice(0, 40) : '';
@@ -197,9 +212,11 @@ function handle(action, p, user){
             var dup = list.some(function(o){ return o.name === name && o.shop === shop });
             if (!dup) list.push({shop: shop, name: name, article: art});
           });
-          patch('products', id, {aliases: list.slice(-12)});   // помним последние написания
+          (upd[id] = upd[id] || {}).aliases = list.slice(-12);   // помним последние написания
         });
       }
+      patchMany('products', upd);                   // цены и словарь — одной записью
+      tick('товары обновлены');
       insert('purchases', {id: pid, date: p.date || new Date().toISOString(), by: p.by || who,
                            total: p.total, source: p.source || null, items: p.items || {},
                            receipt: receipt, prices: {list: prices, moved: moved}});
@@ -263,7 +280,9 @@ function handle(action, p, user){
     } else throw new Error('Неизвестное действие: ' + action);
     ridRemember(rid);
     dropListCache();
-    return listCached(true);
+    var out = listCached(true);
+    tick('склад собран');
+    return out;
   } finally { lock.releaseLock() }
 }
 
@@ -734,6 +753,21 @@ function findRow(name, id){
   for (var i = 0; i < ids.length; i++) if (String(ids[i][0]) === String(id)) return i + 2;
   return -1;
 }
+// Несколько строк за один проход: одно чтение и одна запись вместо трёх обращений
+// к листу на каждое поле. Чек на 15 позиций раньше давал полсотни обращений.
+function patchMany(name, upd){
+  var ids = Object.keys(upd || {}); if (!ids.length) return;
+  var sh = sheet(name), last = sh.getLastRow(), w = sh.getLastColumn();
+  if (last < 2) return;
+  var head = sh.getRange(1,1,1,w).getValues()[0], cId = head.indexOf('id');
+  var grid = sh.getRange(2,1,last-1,w).getValues();
+  grid.forEach(function(r){
+    var u = upd[String(r[cId])]; if (!u) return;
+    head.forEach(function(h,i){ if (h && (h in u)) r[i] = cell(name, h, u[h]) });
+  });
+  sh.getRange(2,1,last-1,w).setValues(grid);
+}
+
 function patch(name, id, obj){
   var sh = sheet(name), r = findRow(name, id);
   if (r < 0) throw new Error('Не нашёл ' + id);

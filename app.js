@@ -828,14 +828,19 @@ document.addEventListener("click", async e => {
   const rs = e.target.closest("[data-restore]");
   if(rs){
     const [col, id] = rs.dataset.restore.split("/");
-    try{ await apply(API.restore(col, id)); toast("Вернул"); haptic("light") }catch(er){ toast("Ошибка: "+er.message) }
+    rs.disabled = true; rs.textContent = "возвращаю…";
+    try{ await apply(API.restore(col, id)); toast("Вернул"); haptic("light") }
+    catch(er){ toast("Ошибка: "+er.message); rs.disabled = false; rs.textContent = "вернуть" }
     return;
   }
   const d = e.target.closest("[data-del]");
   if(d){ if(S.armed !== d.dataset.del){ S.armed = d.dataset.del; render(); return }
     const [col,id] = d.dataset.del.split("/");
     S.armed = null;
-    try{ await apply(API.del(col,id)); toast("Удалено") }catch(er){ toast("Ошибка: "+er.message) } return }
+    // пока идёт запрос — видно, что идёт; иначе кажется, что кнопка мёртвая
+    d.disabled = true; d.textContent = "удаляю…"; d.classList.add("busy");
+    try{ await apply(API.del(col,id)); toast("Удалено"); haptic("light") }
+    catch(er){ toast("Ошибка: "+er.message); render() } return }
   if(e.target.id === "npAdd") return addProduct();
   if(e.target.id === "dockBtn") return e.target.dataset.a === "buy" ? saveBuy() : saveCount();
 });
@@ -949,11 +954,13 @@ async function saveBuy(){
   if(!where){ toast("Впиши, где купили"); $("#buyWhere")?.focus(); return }
   const b = $("#dockBtn"); b.disabled = true;
   try{
-    await apply(API.addPurchase({date:new Date().toISOString(), items, total, by:who,
-                                 source:where, photo:S.f.photo||null}));
+    const date = new Date().toISOString();
+    const receipt = await withPhoto(b, date);
+    b.textContent = "Записываю…";
+    await apply(API.addPurchase({date, items, total, by:who, source:where, receipt}));
     S.buy = {}; S.f.buySum = ""; S.f.photo = null; toast("Закупка добавлена на склад"); haptic("medium");
-    S.tab = "menu"; document.querySelectorAll(".tab").forEach(x => x.setAttribute("aria-selected", x.dataset.tab === "menu")); render(); scrollTo(0,0);
-  }catch(e){ toast("Не сохранилось: "+e.message); b.disabled = false }
+    goHist();
+  }catch(e){ toast("Не сохранилось: "+e.message); b.disabled = false; dock() }
 }
 async function saveCount(){
   // В подсчёт идёт то, что показывали. Скрытым переносим прошлый остаток:
@@ -1009,6 +1016,20 @@ async function addProduct(){
 if(location.search.includes("debug=1"))
   window.__hub = {S, model, render, parseSheet, prepParsed, receiptDate, mergeLines, draftLoad, draftSave, draftDrop, renderCount, shelfOrder, shelfSheet, get M(){ return S.M }};
 
+/* Фото — отдельным шагом до записи: сама запись после этого занимает секунды.
+   Кнопка всё время показывает, что сейчас идёт, — иначе кажется, что зависло. */
+async function withPhoto(btn, date){
+  if(!S.f.photo) return null;
+  if(btn) btn.textContent = "Загружаю фото…";
+  const r = await API.uploadReceipt(S.f.photo, date);
+  return r && r.receipt || null;
+}
+function goHist(){
+  S.tab = "hist";
+  document.querySelectorAll(".tab").forEach(x => x.setAttribute("aria-selected", x.dataset.tab === "hist"));
+  render(); scrollTo(0,0);
+}
+
 /* Дата покупки — с чека. Закупка от 23.09, записанная 29.09, путала бы историю
    и «почём брали». Будущую или нечитаемую дату не берём — тогда сегодня. */
 function receiptDate(iso){
@@ -1054,9 +1075,11 @@ function parseSheet(){
   bg.className = "sheet-bg";
   bg.innerHTML = `<div class="sheet"><div class="grab"><i></i></div><div class="body">
     <h3>Чек разобран</h3>
-    <p class="note" style="margin:2px 0 12px">${esc(P.shop||"магазин не распознан")}${P.date?" · "+esc(P.date):""}${P.total!=null?" · итог "+eur(P.total):""}${P.skipped?` · пропущено залоговых строк: ${P.skipped}`:""}</p>
+    <p class="note" style="margin:2px 0 12px">${esc(P.shop||"магазин не распознан")}${P.date?" · "+esc(P.date):""}${P.total>0?" · итог "+eur(P.total):""}${P.skipped?` · пропущено залоговых строк: ${P.skipped}`:""}</p>
     ${S.M?.last && receiptDate(P.date) < S.M.last.date ? `<p class="warn">Чек от ${esc(P.date)} — раньше прошлого подсчёта ${ddmm(S.M.last.date)}. Закупка попадёт в уже закрытый период и изменит его расход.</p>` : ""}
-    ${P.check && P.check.fits === false ? `<p class="warn">Сумма позиций ${eur(P.check.sum)} не сходится с итогом чека ${eur(P.check.total)}. Проверь внимательно.</p>` : ""}
+    ${!(P.total > 0)
+      ? `<div class="warn">Итог чека не прочитался — впиши его сам.<div class="field" style="margin-top:8px"><input id="pTotal" inputmode="decimal" placeholder="например 189,63"></div></div>`
+      : P.check && P.check.fits === false ? `<p class="warn">Сумма позиций ${eur(P.check.sum)} не сходится с итогом чека ${eur(P.check.total)}. Проверь внимательно.</p>` : ""}
     ${bad.length ? `<h4 class="psec">Требует внимания · ${bad.length}</h4>${bad.map(row).join("")}` : `<p class="note" style="margin:0 0 12px">Вопросов нет — всё сопоставилось.</p>`}
     ${good.length ? `<details class="fold"><summary>Ещё ${good.length} ${plural(good.length,"позиция","позиции","позиций")} · всё понятно</summary>${good.map(row).join("")}</details>` : ""}
     <div class="fields" style="margin-top:16px">
@@ -1081,14 +1104,19 @@ function parseSheet(){
     const take = P.rows.filter(r => r.use && r.id && r.qty > 0);
     if(!take.length) return toast("Нечего записывать");
     const {items, prices, learn} = mergeLines(take, P.shop);
-    e.target.disabled = true;
+    const total = P.total > 0 ? P.total : num(bg.querySelector("#pTotal")?.value);
+    if(!(total > 0)){ toast("Впиши итог чека"); bg.querySelector("#pTotal")?.focus(); return }
+    const btn = e.target, label = btn.textContent;
+    btn.disabled = true;
     try{
-      await apply(API.addPurchase({date: receiptDate(P.date), items, prices, learn,
-        total: P.total ?? (num($("#buySum")?.value) || null),
-        by: $("#buyWho")?.value.trim() || null, source: P.shop || null, photo: S.f.photo || null}));
+      const date = receiptDate(P.date);
+      const receipt = await withPhoto(btn, date);
+      btn.textContent = "Записываю…";
+      await apply(API.addPurchase({date, items, prices, learn, total, receipt,
+        by: $("#buyWho")?.value.trim() || null, source: P.shop || null}));
       S.buy = {}; S.f.photo = null; S.f.parsed = null; S.f.buySum = "";
-      toast("Закупка записана по чеку"); haptic("medium"); close(); render();
-    }catch(err){ toast("Не сохранилось: "+err.message); e.target.disabled = false }
+      toast("Закупка записана по чеку"); haptic("medium"); close(); goHist();
+    }catch(err){ toast("Не сохранилось: "+err.message); btn.disabled = false; btn.textContent = label }
   });
 }
 

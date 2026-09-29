@@ -882,6 +882,51 @@ test('мусор в словарь не попадает', () => {
   assert.ok(!a || !a.length, 'ничего не записалось');
 });
 
+const PNG1 = 'data:image/jpeg;base64,' + Buffer.from('фото чека, как будто').toString('base64');
+
+G('11a. запись закупки не держит замок подолгу');
+
+test('фото грузится до замка — замок во время загрузки свободен', () => {
+  // Загрузка шла внутри замка: Telegram тормозил — и запись закупки тянулась
+  // шесть минут, а удаление и правка стояли в очереди и отваливались.
+  const { env, api } = readyApp();
+  api.handle('addPurchase', { total: 120, items:{aro05:1}, photo: PNG1 }, { id:'1', name:'Миша' });
+  assert.equal(env.drive.sent.length, 1);
+  assert.equal(env.drive.sent[0].lockHeld, 0, 'во время загрузки фото замок не должен быть взят');
+});
+
+test('отдельная загрузка фото: получили id — записали закупку с ним', () => {
+  const { env, api } = readyApp();
+  const up = api.handle('uploadReceipt', { photo: PNG1, date:'2026-09-23' }, { id:'1', name:'Миша' });
+  assert.ok(up.receipt, 'id файла вернулся');
+  assert.equal(env.lockCalls.waitLock, 0, 'загрузка вообще не берёт замок');
+  const out = api.handle('addPurchase', { total: 121, items:{aro05:1}, receipt: up.receipt }, { id:'1', name:'Миша' });
+  const b = Object.values(out.purchases).find(x => x.total === 121);
+  assert.equal(b.receipt, up.receipt, 'в закупке тот самый чек');
+  assert.equal(env.drive.sent.length, 1, 'второй раз фото не отправлялось');
+});
+
+test('повтор закупки с фото не грузит фото второй раз', () => {
+  const { env, api } = readyApp();
+  const pay = { rid:'с-фото', total: 122, items:{aro05:1}, photo: PNG1 };
+  api.handle('addPurchase', Object.assign({}, pay), { id:'1', name:'Миша' });
+  api.handle('addPurchase', Object.assign({}, pay), { id:'1', name:'Миша' });
+  assert.equal(env.drive.sent.length, 1, 'одно фото на одну закупку');
+});
+
+test('чек на много позиций пишет товары одной записью', () => {
+  const { env, api } = readyApp();
+  const ids = ['aro05','aro15','kozel05','staro05','hell250','cola033','pelle033','zbnealko','zbtmave','redbull250'];
+  const prices = {}, learn = [];
+  ids.forEach((id, i) => { prices[id] = 0.5 + i / 10; learn.push({id, name:'СТРОКА ' + i, shop:'Metro'}) });
+  env.stats.reset();
+  const out = api.handle('addPurchase', { total: 123, items:{aro05:1}, prices, learn }, { id:'1', name:'Миша' });
+  const cellWrites = env.stats.log.filter(x => /^products\.setValue\b/.test(x)).length;
+  assert.equal(cellWrites, 0, 'по ячейке писать нельзя, было: ' + cellWrites);
+  assert.equal(out.products.hell250.cost, 0.9, 'цены при этом записались');
+  assert.equal(out.products.hell250.aliases.slice(-1)[0].name, 'СТРОКА 4', 'и словарь тоже');
+});
+
 G('12. повтор запроса не заводит дубль');
 
 test('повтор с тем же номером не пишет вторую закупку', () => {
@@ -941,7 +986,6 @@ test('повтор возвращает актуальный склад, а не
 
 G('11. чек закупки');
 
-const PNG1 = 'data:image/jpeg;base64,' + Buffer.from('фото чека, как будто').toString('base64');
 
 test('закупка с фото: фото ушло в Telegram, в строке — только file_id', () => {
   const { env, api } = readyApp();

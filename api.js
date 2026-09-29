@@ -20,12 +20,24 @@ window.API = (function(){
 
   const flaky = (e, ms) => { const x = new Error(e); x.retry = true; x.wait = ms; return x };
 
+  // Запрос не должен висеть вечно: раньше запись закупки шла шесть минут, и кнопка
+  // так и оставалась бледной. По таймауту — повтор с тем же номером запроса,
+  // а сервер по номеру не заведёт дубль. Фото грузится дольше — ему больше времени.
+  const LIMIT = {uploadReceipt: 150000, parseReceipt: 90000};
   async function once(action, payload){
-    const r = await fetch(C.API, {
-      method:"POST",
-      headers:{"Content-Type":"text/plain;charset=utf-8"}, // simple request — без preflight
-      body: JSON.stringify({ action, payload, initData: TG?.initData || "" })
-    });
+    const ctl = typeof AbortController === "function" ? new AbortController() : null;
+    const tm = ctl ? setTimeout(() => ctl.abort(), LIMIT[action] || 60000) : null;
+    let r;
+    try {
+      r = await fetch(C.API, {
+        method:"POST", signal: ctl?.signal,
+        headers:{"Content-Type":"text/plain;charset=utf-8"}, // simple request — без preflight
+        body: JSON.stringify({ action, payload, initData: TG?.initData || "" })
+      });
+    } catch(e){
+      if(e && e.name === "AbortError") throw flaky("сервер долго не отвечает");
+      throw e;
+    } finally { if(tm) clearTimeout(tm) }
     // Ответ прилетает через перенаправление Google, и сама эта ссылка иногда
     // отдаёт 404 или 5xx, хотя скрипт отработал. Такой код — повод повторить,
     // а не показывать команде «склад не загрузился».
@@ -40,7 +52,7 @@ window.API = (function(){
 
   // Номер попытки сохранить. Генерируем ОДИН раз на действие человека, а не на
   // каждый повтор: иначе защита от дубля на сервере потеряет смысл.
-  const WRITES = ["addPurchase","addCount","addReturn","addProduct","updateProduct","delete","restore","update","reorder"];
+  const WRITES = ["addPurchase","addCount","addReturn","addProduct","updateProduct","delete","restore","update","reorder","uploadReceipt"];
   const rid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 
   async function post(action, payload){
@@ -117,6 +129,8 @@ window.API = (function(){
     // фото чека тянем только когда карточку открыли: оно тяжёлое, в общий список не кладём
     async receipt(id){ return post("getReceipt", {id}) },
     async parse(photo){ return post("parseReceipt", {photo}) },
+    // фото грузим отдельно и заранее: сама запись закупки после этого — секунды
+    async uploadReceipt(photo, date){ return post("uploadReceipt", {photo, date}) },
     async addReturn(x){ return norm(await post("addReturn", x)) },
     async addCount(x){ return norm(await post("addCount", x)) },
     async addProduct(id, data){ return norm(await post("addProduct", {id, data})) },

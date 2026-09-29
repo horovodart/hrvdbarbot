@@ -282,7 +282,7 @@ export function makeEnv(opts = {}) {
         if (!p.document) return body(200, JSON.stringify({ ok: false, description: 'нет файла' }));
         const id = 'tgfile-' + (++drive.seq);
         drive.files.set(id, { id, blob: p.document, caption: p.caption, chat: p.chat_id });
-        drive.sent.push({ chat: p.chat_id, caption: p.caption, kind: 'document' });
+        drive.sent.push({ chat: p.chat_id, caption: p.caption, kind: 'document', lockHeld: lockCalls.held });
         return body(200, JSON.stringify({ ok: true, result: { document: { file_id: id } } }));
       }
       if (url.indexOf('/sendPhoto') >= 0) {

@@ -258,3 +258,4 @@ button.sec:active{opacity:.6}
   touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none}
 .srow.dragging{z-index:5;box-shadow:0 8px 24px rgba(10,12,18,.16);border-radius:12px;transition:none}
 .srow.dragging .dh{cursor:grabbing;color:var(--accent)}
+.del.busy{opacity:.6;pointer-events:none}
