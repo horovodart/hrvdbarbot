@@ -1007,7 +1007,7 @@ async function addProduct(){
    Нужен для сверки цифр приложения против эталонного пересчёта. */
 // Отладочный ход: без него окна вроде подтверждения чека нечем проверить глазами
 if(location.search.includes("debug=1"))
-  window.__hub = {S, model, render, parseSheet, prepParsed, receiptDate, draftLoad, draftSave, draftDrop, renderCount, shelfOrder, shelfSheet, get M(){ return S.M }};
+  window.__hub = {S, model, render, parseSheet, prepParsed, receiptDate, mergeLines, draftLoad, draftSave, draftDrop, renderCount, shelfOrder, shelfSheet, get M(){ return S.M }};
 
 /* Дата покупки — с чека. Закупка от 23.09, записанная 29.09, путала бы историю
    и «почём брали». Будущую или нечитаемую дату не берём — тогда сегодня. */
@@ -1016,6 +1016,21 @@ function receiptDate(iso){
   if(!/^\d{4}-\d{2}-\d{2}$/.test(iso || "")) return now.toISOString();
   const d = new Date(iso + "T12:00:00");
   return isNaN(d) || d > now ? now.toISOString() : d.toISOString();
+}
+
+/* Несколько строк чека могут лечь на один товар — три вкуса ZB 0,0% или две
+   пачки чипсов. Штуки складываем, а цена — средняя по штукам, а не с последней
+   строки: иначе 0,79 · 0,79 · 0,76 давали бы 0,76. */
+function mergeLines(take, shop){
+  const items = {}, sums = {}, learn = [];
+  for(const r of take){
+    items[r.id] = (items[r.id] || 0) + r.qty;
+    if(r.unit > 0){ const t = sums[r.id] ||= {q:0, s:0}; t.q += r.qty; t.s += r.qty * r.unit }
+    learn.push({id:r.id, name:r.name, article:r.article, shop});
+  }
+  const prices = {};
+  for(const [k, t] of Object.entries(sums)) if(t.q > 0) prices[k] = Math.round(t.s / t.q * 1000) / 1000;
+  return {items, prices, learn};
 }
 
 /* Окно подтверждения разбора */
@@ -1065,12 +1080,7 @@ function parseSheet(){
     if(e.target.id !== "pOk") return;
     const take = P.rows.filter(r => r.use && r.id && r.qty > 0);
     if(!take.length) return toast("Нечего записывать");
-    const items = {}, prices = {}, learn = [];
-    for(const r of take){
-      items[r.id] = (items[r.id] || 0) + r.qty;
-      if(r.unit > 0) prices[r.id] = r.unit;
-      learn.push({id:r.id, name:r.name, article:r.article, shop:P.shop});
-    }
+    const {items, prices, learn} = mergeLines(take, P.shop);
     e.target.disabled = true;
     try{
       await apply(API.addPurchase({date: receiptDate(P.date), items, prices, learn,

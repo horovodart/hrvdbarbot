@@ -507,6 +507,25 @@ console.log("\n— 9. сверка с tools/reference.py (hub-bar-data.json) —
 }
 
 /* ------------------------------------------------------------------ */
+console.log("\n— 17. несколько строк чека на один товар —");
+{
+  const { hub } = loadHub({});
+  const r = hub.mergeLines([
+    {id:"zb0", name:"ZB 0,0% CI-BA-MAT", qty:6, unit:0.787},
+    {id:"zb0", name:"ZB 0,0% TM.CIT",    qty:6, unit:0.787},
+    {id:"zb0", name:"ZB 0,0% MANG",      qty:6, unit:0.762},
+    {id:"hell", name:"HELL",             qty:72, unit:0.652}
+  ], "Metro");
+  eq("17.1 штуки складываются", r.items.zb0, 18);
+  eq("17.2 цена — средняя по штукам, а не с последней строки", r.prices.zb0, 0.779);
+  eq("17.3 одиночная строка — как есть", r.prices.hell, 0.652);
+  eq("17.4 каждое написание уходит в словарь", r.learn.filter(x => x.id === "zb0").length, 3);
+  const w = hub.mergeLines([{id:"c", name:"a", qty:1, unit:1.23}, {id:"c", name:"b", qty:3, unit:1.43}], "X");
+  eq("17.5 среднее взвешено по штукам: (1,23 + 3×1,43) / 4", w.prices.c, 1.38);
+  const n = hub.mergeLines([{id:"c", name:"a", qty:2, unit:null}], "X");
+  ok("17.6 строка без цены цену не портит", !("c" in n.prices) && n.items.c === 2);
+}
+
 console.log("\n— 16. дата закупки берётся с чека —");
 {
   const { hub } = loadHub({ now:"2026-09-29T09:00:00.000Z" });
