@@ -9,7 +9,8 @@
    2. приложение и эталон (tools/reference.py) считают одно и то же —
       те же периоды, остатки, закупку и тару;
    3. фото чека ходит обратно: берём последний сохранённый чек и читаем его;
-   4. план напоминаний строится (без отправки).
+   4. план напоминаний строится (без отправки), и прогноз тары на сервере
+      совпадает с тем, что показывает приложение.
 
    Нужен токен бота в .env.local (BOT_TOKEN=…): им подписываем запрос так же,
    как это делает Telegram. Без токена тест честно говорит «пропущено».
@@ -48,7 +49,7 @@ function initData(){
 }
 
 // только чтение: пишущие действия сюда не пускаем даже случайно
-const READ_ONLY = new Set(["list", "getReceipt", "remindPlan"]);
+const READ_ONLY = new Set(["list", "getReceipt", "remindPlan", "tareNow"]);
 async function call(action, payload = {}, check = () => true){
   if (!READ_ONLY.has(action)) throw new Error("дымовой тест не пишет: " + action);
   let last;
@@ -101,6 +102,10 @@ print(json.dumps({"recs":[{k:r[k] for k in ("saleUnits","expected","got","net")}
   M.recs.forEach((r, i) => ["saleUnits", "expected", "got", "net"].forEach(k => { if (!near(r[k], ref.recs[i]?.[k])) diffs.push(`период ${i}: ${k} ${r[k]} ≠ ${ref.recs[i]?.[k]}`) }));
   for (const id of Object.keys(ref.items)) ["exact", "st", "need"].forEach(k => { if (!near(M.items[id]?.[k], ref.items[id][k])) diffs.push(`${id}.${k} ${M.items[id]?.[k]} ≠ ${ref.items[id][k]}`) });
   ["unitsWaiting", "waiting"].forEach(k => { if (!near(M.tare[k], ref.tare[k])) diffs.push(`тара.${k} ${M.tare[k]} ≠ ${ref.tare[k]}`) });
+  // прогноз тары для напоминаний считает сервер — у него своя копия формулы
+  const srv = await call("tareNow", {}, d => d && typeof d.units === "number");
+  if (Math.abs(srv.units - M.tare.unitsWaiting) > 1)
+    diffs.push(`прогноз тары: сервер ${srv.units} шт, приложение ${M.tare.unitsWaiting} шт`);
   diffs.length ? bad("приложение и эталон разошлись на живых данных", diffs.slice(0, 5).join("; "))
                : ok("приложение и эталон сошлись на живых данных", `${M.recs.length} период(а), ${Object.keys(ref.items).length} позиций, тара ${M.tare.unitsWaiting} шт`);
 } catch (e) { bad("сверка с эталоном не прошла", e.message) }
@@ -120,7 +125,7 @@ try {
 // 4. план напоминаний строится
 try {
   const plan = await call("remindPlan", {}, Array.isArray);
-  ok("план напоминаний строится", plan.length ? plan.map(p => p.kind).join(", ") : "сегодня напоминать нечего");
+  ok("план напоминаний строится", plan.length ? plan.map(p => `${p.kind} → ${p.to} чел.`).join(", ") : "сегодня напоминать нечего");
 } catch (e) { bad("план напоминаний не строится", e.message) }
 
 console.log(fail ? `\nДымовой тест: провалов ${fail}` : "\nДымовой тест пройден.");

@@ -135,7 +135,8 @@ function allowed(id, user){
 function handle(action, p, user){
   var lock = LockService.getScriptLock();
   if (action === 'parseReceipt') return parseReceipt(p.photo);   // чтение: замок не нужен
-  if (action === 'remindPlan') return remindPlan(new Date()).map(function(m){ return {kind:m.kind, text:m.text} });
+  if (action === 'remindPlan') return remindPlan(new Date()).map(function(m){ return {kind:m.kind, text:m.text, to:remindTo(m.kind).length} });
+  if (action === 'tareNow') return tareForecast(new Date());   // для сверки с приложением в дымовом тесте
   if (action === 'list'){
     // Замок нужен, только если чтение может что-то записать: первый запуск или
     // разъехавшийся сид. Иначе двое открывших приложение одновременно вставали в
@@ -555,40 +556,54 @@ function parseReceipt(photo){
 
 /* ---------- напоминания от бота ----------
    Раз в день по таймеру (ставится в редакторе скрипта: Триггеры → remindTick).
-   Только по фактам: срок — от даты прошлого подсчёта, тара — по тому, что
-   подсчёты показали выпитым после последней сдачи. Никаких прогнозов по
-   среднему расходу: напоминание приходит, когда цифра настоящая.
-   Каждое напоминание — один раз на своё состояние, повторов в тот же день нет. */
+   Подсчёт — по сроку от прошлого подсчёта.
+   Тара — по ПРОГНОЗУ: на подсчёте человек и так видит, сколько пустой тары,
+   напоминание нужно именно между подсчётами. Поэтому в тексте «примерно».
+   Прогноз считается ровно как в приложении (M.tare.unitsWaiting): факт по
+   подсчётам после сдачи плюс средний расход × дни. Дымовой тест сверяет их.
+   Кому что слать — свойства REMIND_COUNT_TO и REMIND_TARE_TO (id через запятую),
+   иначе REMIND_CHAT, иначе вся команда. Каждое напоминание — раз на своё состояние. */
 var REMIND = {countDays: 14, countAgain: 21, tareEur: 10};
 
 function lastBy(list){ return list.slice().sort(function(a,b){ return a.date < b.date ? -1 : 1 }).pop() || null }
 function notDeleted(list){ return list.filter(function(r){ return !r.deleted }) }
 
-// залог в пустой таре, выпитый ПОСЛЕ последней сдачи — только по подсчётам
-function tareFacts(){
+// Тара с прогнозом — повторяет модель приложения. Расход по товару — средний по
+// измеренным периодам не короче суток; «измерен» — если покупали или убыло.
+function tareForecast(now){
+  now = now || new Date();
   var counts = notDeleted(rows('counts')).sort(function(a,b){ return a.date < b.date ? -1 : 1 });
   var buys = notDeleted(rows('purchases')), rets = notDeleted(rows('returns'));
-  var prods = {}; rows('products').forEach(function(p){ prods[p.id] = p });
+  var prods = rows('products');
   var lastRet = (lastBy(rets) || {}).date || null;
+  var last = counts.length ? counts[counts.length-1] : null;
+  var from = lastRet && (!last || lastRet > last.date) ? lastRet : (last ? last.date : null);
+  var dGrow = from ? Math.max(0, (now - new Date(from)) / 864e5) : 0;
+  var boughtIn = function(id, a, b){ var n = 0;
+    buys.forEach(function(x){ if (x.date > a && x.date <= b) n += Number((x.items || {})[id]) || 0 }); return n };
   var units = 0;
-  for (var i = 1; i < counts.length; i++) {
-    var a = counts[i-1], b = counts[i];
-    if (lastRet && b.date <= lastRet) continue;                 // период целиком до сдачи
-    var days = (new Date(b.date) - new Date(a.date)) / 864e5 || 1;
-    var share = !lastRet || a.date >= lastRet ? 1
-              : Math.max(0, Math.min(1, (new Date(b.date) - new Date(lastRet)) / 864e5 / days));
-    Object.keys(prods).forEach(function(id){
-      var dep = Number(prods[id].dep) || 0; if (!dep) return;
-      var A = (a.stock || {})[id], B = (b.stock || {})[id];
-      if (A == null || B == null) return;
-      var bought = 0;
-      buys.forEach(function(x){ if (x.date > a.date && x.date <= b.date) bought += Number((x.items || {})[id]) || 0 });
-      units += Math.max(0, A + bought - B) * share;
-    });
-  }
-  units = Math.round(units);
-  return {units: units, eur: Math.round(units * DEPOSIT_UNIT * 100) / 100, lastRet: lastRet,
-          lastCount: counts.length ? counts[counts.length-1] : null};
+  prods.forEach(function(p){
+    if (!(Number(p.dep) > 0)) return;
+    var tot = 0, dd = 0;
+    for (var i = 1; i < counts.length; i++) {
+      var a = counts[i-1], b = counts[i];
+      var A = (a.stock || {})[p.id], B = (b.stock || {})[p.id];
+      if (A == null || B == null) continue;
+      var bt = boughtIn(p.id, a.date, b.date), c = Number(A) + bt - Number(B);
+      var days = (new Date(b.date) - new Date(a.date)) / 864e5;
+      if ((bt > 0 || c > 0) && days >= 1) { tot += c; dd += days }
+      var cc = Math.max(0, c);
+      if (!cc) continue;
+      if (!lastRet) { units += cc; continue }
+      if (b.date <= lastRet) continue;
+      var share = a.date >= lastRet ? 1 : Math.max(0, Math.min(1, ((new Date(b.date) - new Date(lastRet)) / 864e5) / (days || 1)));
+      units += cc * share;
+    }
+    var rate = dd > 0 ? Math.max(0, tot / dd) : 0;
+    if (rate) units += rate * dGrow;
+  });
+  var n = Math.max(0, Math.round(units));
+  return {units: n, eur: Math.round(n * DEPOSIT_UNIT * 100) / 100, lastRet: lastRet};
 }
 
 // что сейчас стоит отправить — без отправки, чтобы можно было посмотреть заранее
@@ -607,17 +622,21 @@ function remindPlan(now){
       plan.push({kind:'count', key:'REMIND_COUNT', val:last.id,
         text:'Пора считать склад: прошлый подсчёт был ' + dd + ', прошло ' + d + ' дней.'});
   }
-  var t = tareFacts();
-  var tkey = (t.lastRet || '-') + '|' + (t.lastCount ? t.lastCount.id : '-');
+  // тара: один раз на каждую сдачу — сдали, и счёт пошёл заново
+  var t = tareForecast(now);
+  var tkey = t.lastRet || '-';
   if (t.eur >= REMIND.tareEur && props.getProperty('REMIND_TARE') !== tkey)
     plan.push({kind:'tare', key:'REMIND_TARE', val:tkey,
-      text:'Тары накопилось на ' + t.eur.toFixed(2).replace('.', ',') + ' € — ' + t.units +
-           ' бутылок и банок, по подсчёту. Самое время сдать.'});
+      text:'Тары, по прогнозу, накопилось примерно на ' + t.eur.toFixed(2).replace('.', ',') + ' € — около ' +
+           t.units + ' бутылок и банок с последней сдачи. Самое время отвезти.'});
   return plan;
 }
 
-// кому: всем из листа команды — кто не нажимал «Старт» у бота, тому Telegram не даст написать
-function remindTo(){
+// кому: своё свойство на каждый вид, иначе общий чат, иначе вся команда.
+// Кто не нажимал «Старт» у бота, тому Telegram не даст написать — это нормально.
+function remindTo(kind){
+  var own = prop(kind === 'tare' ? 'REMIND_TARE_TO' : 'REMIND_COUNT_TO');
+  if (own) return String(own).split(',').map(function(x){ return x.trim() }).filter(String);
   var c = prop('REMIND_CHAT');
   if (c) return [String(c).trim()];
   return rows('team').map(function(r){ return String(r.tg_id || '').trim() }).filter(String);
@@ -630,7 +649,7 @@ function remindTick(){
   try { url = tg('getChatMenuButton', {}).web_app.url } catch (e) {}   // свежий адрес, с версией
   var props = PropertiesService.getScriptProperties(), sent = 0;
   plan.forEach(function(m){
-    remindTo().forEach(function(chat){
+    remindTo(m.kind).forEach(function(chat){
       try {
         tg('sendMessage', {chat_id: chat, text: m.text,
           reply_markup: url ? {inline_keyboard: [[{text: 'Открыть бар', web_app: {url: url}}]]} : undefined});

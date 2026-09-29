@@ -1160,42 +1160,66 @@ test('новый подсчёт сбрасывает счётчик напоми
   assert.deepEqual(api.remindPlan(new Date(day(29))).map(m => m.kind), ['count'], 'и через 14 дней от него — снова');
 });
 
-test('тара — только по подсчётам, без прогноза', () => {
-  // выпито 80 банок с залогом между подсчётами = 12,00 € — выше порога в 10 €
+test('тара — по прогнозу: факт после сдачи плюс средний расход за прошедшие дни', () => {
+  // 100 → 20 за 10 дней: выпито 80, расход 8 в день. Через день после подсчёта
+  // прогноз 80 + 8 = 88 штук = 13,20 € — выше порога.
   const { api } = newApp({ sheets: remindBook([
     {id:'c1', date: day(0), stock:{kozel05:100}},
     {id:'c2', date: day(10), stock:{kozel05:20}}
   ]), props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
-  const t = api.tareFacts();
-  assert.equal(t.units, 80);
-  assert.equal(t.eur, 12);
-  const plan = api.remindPlan(new Date(day(11)));
-  assert.ok(plan.some(m => m.kind === 'tare' && /12,00/.test(m.text)), JSON.stringify(plan));
+  const t = api.tareForecast(new Date(day(11)));
+  assert.equal(t.units, 88);
+  assert.equal(t.eur, 13.2);
+  const m = api.remindPlan(new Date(day(11))).find(x => x.kind === 'tare');
+  assert.ok(m, 'напоминание есть');
+  assert.match(m.text, /примерно/, 'прогноз подписан как прогноз, а не как факт');
 });
 
-test('тара после сдачи обнуляется — напоминать не о чем', () => {
+test('тара напоминает между подсчётами — пока идут дни, прогноз растёт', () => {
+  // сдали всё в день подсчёта; дальше пьют по 8 в день — через 9 дней 72 шт = 10,80 €
   const { api } = newApp({ sheets: remindBook(
     [{id:'c1', date: day(0), stock:{kozel05:100}}, {id:'c2', date: day(10), stock:{kozel05:20}}],
     [{id:'r1', date: day(10), amount: 12, units: 80, toTill: true}]),
     props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
-  assert.equal(api.tareFacts().units, 0, 'весь период до сдачи — уже сдано');
-  assert.ok(!api.remindPlan(new Date(day(11))).some(m => m.kind === 'tare'));
+  assert.equal(api.tareForecast(new Date(day(10))).units, 0, 'сдали — ноль');
+  assert.ok(!api.remindPlan(new Date(day(14))).some(m => m.kind === 'tare'), '4 дня — 32 шт, рано');
+  assert.ok(api.remindPlan(new Date(day(19))).some(m => m.kind === 'tare'), '9 дней — 72 шт, пора');
+});
+
+test('тара: одно напоминание на сдачу, новая сдача — новый счёт', () => {
+  const { env, api } = newApp({ sheets: remindBook(
+    [{id:'c1', date: day(0), stock:{kozel05:100}}, {id:'c2', date: day(10), stock:{kozel05:20}}]),
+    props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
+  api.remindPlan(new Date(day(11))).forEach(m => env.props[m.key] = m.val);
+  assert.ok(!api.remindPlan(new Date(day(15))).some(m => m.kind === 'tare'), 'до сдачи не повторяем');
+  api.handle('addReturn', { date: day(16), amount: 13, units: 88, toTill: true }, { id:'1', name:'Миша' });
+  assert.ok(api.remindPlan(new Date(day(25))).some(m => m.kind === 'tare'), 'после новой сдачи — снова, когда накопится');
 });
 
 test('ниже порога — не беспокоим', () => {
   const { api } = newApp({ sheets: remindBook([
     {id:'c1', date: day(0), stock:{kozel05:100}}, {id:'c2', date: day(10), stock:{kozel05:50}}
   ]), props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
-  assert.equal(api.tareFacts().eur, 7.5);
-  assert.ok(!api.remindPlan(new Date(day(11))).some(m => m.kind === 'tare'), '7,50 € — рано');
+  assert.equal(api.tareForecast(new Date(day(11))).eur, 8.25);   // 50 + 5 = 55 шт
+  assert.ok(!api.remindPlan(new Date(day(11))).some(m => m.kind === 'tare'), '8,25 € — рано');
 });
 
-test('удалённый подсчёт в напоминаниях не участвует', () => {
+test('удалённый подсчёт в прогнозе тары не участвует', () => {
   const { api } = newApp({ sheets: remindBook([
     {id:'c1', date: day(0), stock:{kozel05:100}},
     {id:'cX', date: day(12), stock:{kozel05:0}, deleted: day(13)}
   ]), props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
-  assert.equal(api.tareFacts().units, 0, 'удалённый подсчёт не создаёт «выпитого»');
+  assert.equal(api.tareForecast(new Date(day(13))).units, 0, 'удалённый подсчёт не создаёт «выпитого»');
+});
+
+test('кому что: подсчёт только Кате, тара — своему адресату', () => {
+  const { env, api } = newApp({ sheets: remindBook([
+    {id:'c1', date: day(-30), stock:{kozel05:100}}, {id:'c2', date: day(-20), stock:{kozel05:20}}
+  ]), props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN, REMIND_COUNT_TO: '587696431', REMIND_TARE_TO: '1285269855,450027563' } });
+  api.remindTick();
+  const byKind = k => env.drive.messages.filter(m => (k === 'count' ? /подсчёт|считать/i : /тар/i).test(m.text)).map(m => String(m.chat_id));
+  assert.deepEqual(byKind('count'), ['587696431'], 'про подсчёт — только Кате');
+  assert.deepEqual(byKind('tare').sort(), ['1285269855','450027563'], 'про тару — своим');
 });
 
 test('отправка: всем из команды, с кнопкой в приложение, и не повторяет', () => {
