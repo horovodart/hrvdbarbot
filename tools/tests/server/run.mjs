@@ -1437,6 +1437,17 @@ test('правка не трогает то, что не разрешено: ч�
   assert.ok(api.listAll().purchases[id], 'id на месте');
 });
 
+test('амнистию можно поставить на уже записанный подсчёт', () => {
+  const { api } = readyApp();
+  const out = api.handle('addCount', { date:'2026-10-11T10:00:00.000Z', cash: 51, card: 0, stock:{aro05:5} }, U);
+  const id = Object.entries(out.counts).find(([,c]) => c.cash === 51)[0];
+  assert.equal(api.listAll().counts[id].amnesty, false);
+  api.handle('update', { col:'counts', id, patch:{ amnesty: true } }, U);
+  const c = api.listAll().counts[id];
+  assert.equal(c.amnesty, true, 'амнистия стоит');
+  assert.equal(c.editedBy, U.name, 'и видно, кто поставил');
+});
+
 test('остатки в подсчёте править нельзя — деньги периода заморожены', () => {
   const { api } = readyApp();
   const out = api.handle('addCount', { date:'2026-10-10T10:00:00.000Z', cash: 50, card: 0, stock:{aro05:5} }, U);

@@ -193,6 +193,15 @@ function model(){
   all.payRate = all.expected > 0 ? all.got/all.expected : null;
   all.since  = amnestyAt;
   all.periods = scored.length;
+  // Что списала амнистия — «сумма трагедии». Не пропадает: её видно в карточке денег.
+  if(amnestyAt){
+    const gone = recs.filter(r => r.from.date < amnestyAt);
+    all.before = gone.reduce((o,r) => ({expected:o.expected+r.expected, got:o.got+r.got,
+      cost:o.cost+r.costSale+r.costWater, units:o.units+r.saleUnits}), {expected:0, got:0, cost:0, units:0});
+    all.before.short = all.before.got - all.before.expected;
+    all.before.net   = all.before.got - all.before.cost;
+    all.before.from  = gone.length ? gone[0].from.date : null;
+  }
 
   // сколько периодов подряд с конца держим планку — по ним снижаем цену
   all.streak = 0;
@@ -721,6 +730,12 @@ function moneySheet(r){
       <h3>Деньги за период</h3>
       <div class="meta">${ddmm(r.from.date)} – ${ddmm(r.to.date)} · ${Math.round(r.days)} дн.</div>
       <div style="margin-top:16px">${money(r)}</div>
+      ${S.M.all.before && S.M.all.before.units ? `<div class="blk"><h4>Списано амнистией ${ddmm(S.M.all.since)}</h4>
+        <dl class="recon num">
+          <dt>${S.M.all.before.from ? ddmm(S.M.all.before.from)+" – "+ddmm(S.M.all.since)+" · " : ""}выпито платных</dt><dd>${S.M.all.before.units} шт</dd>
+          <dt>Недобор</dt><dd class="neg">${eur(S.M.all.before.short)}</dd>
+          <dt class="tot">Бар в сумме</dt><dd class="tot ${S.M.all.before.net>=0?"pos":"neg"}">${S.M.all.before.net>0?"+":""}${eur(S.M.all.before.net)}</dd>
+        </dl></div>` : ""}
       ${S.M.all.since && !S.M.all.periods ? `<div class="blk"><h4>Амнистия ${ddmm(S.M.all.since)}</h4>
         <p class="note" style="margin:0">Прошлый недобор списан. Счёт начнётся со следующего подсчёта: цель — платить за ${Math.round(C.GOAL_RATE*100)}% выпитого. Продержим ${C.GOAL_PERIODS} ${plural(C.GOAL_PERIODS,"период","периода","периодов")} подряд — и цена упадёт до ${eur(1)}.</p></div>` : ""}
       ${S.M.all.periods ? `<div class="blk"><h4>${S.M.all.since ? "С амнистии "+ddmm(S.M.all.since) : "За всё время"}</h4>

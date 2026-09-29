@@ -26,7 +26,7 @@ var JSON_FIELDS = {stock:1, items:1, frozen:1, prices:1, aliases:1};
    тоже не трогаем: это факт, а не ввод. */
 var EDITABLE = {
   purchases: {total:1, source:1, by:1, items:1},
-  counts:    {cash:1, card:1, by:1, note:1},
+  counts:    {cash:1, card:1, by:1, note:1, amnesty:1},   // амнистию можно поставить и задним числом
   returns:   {amount:1, units:1, toTill:1, note:1}
 };
 // удаляются мягко: строка остаётся, с пометкой кто и когда — её можно вернуть
