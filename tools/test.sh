@@ -23,6 +23,8 @@ step () {                       # step «название» команда…
 echo "Проверки:"
 step "фронтенд"        node tools/tests/front/run.mjs
 step "Apps Script"     node tools/tests/server/run.mjs
+node tools/build-seed.mjs >/dev/null   # справочник для сервера на Cloudflare — из Seed.gs
+step "сервер Cloudflare" node tools/tests/worker/run.mjs
 step "фаззинг ($FUZZ_N случаев против эталона)" node tools/tests/fuzz/run.mjs "$FUZZ_N" 1
 step "регрессии (починенные расхождения)" node tools/tests/fuzz/minimal.mjs
 step "эталон на боевых данных" python3 tools/reference.py

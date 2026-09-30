@@ -46,7 +46,7 @@ function doGet(e)  {
     //  — замок берём на пару секунд и, если занят, молча уходим, чтобы не мешать команде;
     //  — пишутся только строки, заведённые из кода, так что подсунуть ничего нельзя.
     var synced = false;
-    if (String(PropertiesService.getScriptProperties().getProperty('SEED_VERSION')) !== String(SEED_VERSION)) {
+    if (!movedTo() && String(PropertiesService.getScriptProperties().getProperty('SEED_VERSION')) !== String(SEED_VERSION)) {
       try {
         var lock = LockService.getScriptLock();
         if (lock.tryLock(2000)) {
@@ -55,7 +55,8 @@ function doGet(e)  {
         }
       } catch (err) { /* синк не критичен для проверки живости */ }
     }
-    return {alive:true, synced:synced, ts:new Date().toISOString()};
+    return movedTo() ? {alive:true, synced:synced, moved:movedTo(), ts:new Date().toISOString()}
+                     : {alive:true, synced:synced, ts:new Date().toISOString()};
   });
 }
 function doPost(e) {
@@ -136,8 +137,38 @@ function allowed(id, user){
 var T0 = 0;
 function tick(what){ try { console.log((Date.now() - T0) + ' мс · ' + what) } catch (e) {} }
 
+/* Переезд. Сервер теперь на Cloudflare; этот остаётся только для копий приложения,
+   которые Telegram держит в кэше: склад показывает, но ничего не меняет и никому не пишет —
+   иначе данные разъехались бы по двум серверам. */
+var MOVED_TO_DEFAULT = '';
+var MOVED_MSG = 'Сервер переехал. Закройте приложение полностью и откройте снова.';
+function movedTo(){ return prop('MOVED_TO') || MOVED_TO_DEFAULT }
+var READ_ONLY_ACTIONS = {list:1, getReceipt:1, tareNow:1, remindPlan:1, export:1};
+
+function isAdmin(id){
+  id = String(id || '');
+  var admins = String(prop('ADMIN_IDS') || '').split(',').map(function(s){ return s.trim() }).filter(String);
+  if (admins.indexOf(id) >= 0) return true;
+  return rows('team').some(function(r){ return String(r.tg_id).trim() === id && String(r.role || '').toLowerCase() === 'admin' });
+}
+
+// Всё как есть — для переезда и сверки. Секреты (токены, ключи) не отдаём.
+function exportAll(){
+  var out = listAll();
+  out.team = rows('team').map(function(r){ return {tg_id: String(r.tg_id).trim(), name: r.name, role: r.role} });
+  var all = PropertiesService.getScriptProperties().getProperties(), props = {};
+  Object.keys(all).forEach(function(k){ if (!/TOKEN|KEY|SECRET/i.test(k)) props[k] = all[k] });
+  out.props = props;
+  return out;
+}
+
 function handle(action, p, user){
   T0 = Date.now();
+  if (movedTo() && !READ_ONLY_ACTIONS[action]) throw new Error(MOVED_MSG);
+  if (action === 'export'){
+    if (!user || !isAdmin(user.id)) throw new Error('Только для админов');
+    return exportAll();
+  }
   var lock = LockService.getScriptLock();
   if (action === 'parseReceipt') return parseReceipt(p.photo);   // чтение: замок не нужен
   // Фото чека грузим ДО замка на запись. Раньше загрузка шла внутри, и если
@@ -706,6 +737,7 @@ function remindTo(kind){
 }
 
 function remindTick(){
+  if (movedTo()) return {sent: 0, moved: true};   // напоминания шлёт новый сервер
   var plan = remindPlan(new Date());
   if (!plan.length) return {sent: 0};
   var url = null;
@@ -728,7 +760,7 @@ function listAll(){
   if (sheet('products').getLastRow() < 2) setup();   // первый запуск — заливаем стартовые данные сами
   // syncTeam раньше выполнялся на каждое чтение: это лишние записи в лист на
   // ровном месте. Справочник трогаем только когда сид действительно разъехался.
-  else if (needSeed()) { try { syncProducts(); syncTeam() } catch (e) { /* склад важнее синка справочника */ } }
+  else if (!movedTo() && needSeed()) { try { syncProducts(); syncTeam() } catch (e) { /* склад важнее синка справочника */ } }
   var out = {};
   ['products','counts','purchases','returns'].forEach(function(name){
     var o = {};

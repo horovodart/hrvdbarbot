@@ -1167,6 +1167,30 @@ test('кусок чека выпал из кэша — качаем заново
   assert.equal(got.data, big.toString('base64'), 'и отдали целое фото');
 });
 
+test('выгрузка для переезда: всё, команда, настройки без секретов — только админу', () => {
+  const { api } = readyApp({ REMIND_TARE_TO: '1285269855', ANTHROPIC_KEY: 'секрет' });
+  const out = api.handle('export', {}, { id: String(USER.id), name: 'Миша' });
+  assert.ok(out.products && out.counts && out.purchases && out.returns, 'все четыре раздела');
+  assert.ok(out.team.length >= 5 && out.team.every(t => typeof t.tg_id === 'string'), 'команда');
+  assert.equal(out.props.REMIND_TARE_TO, '1285269855', 'настройки');
+  assert.ok(!('ANTHROPIC_KEY' in out.props) && !('BOT_TOKEN' in out.props), 'секретов нет');
+  const notAdmin = readyApp();
+  throws(() => notAdmin.api.handle('export', {}, { id: '999', name: 'Чужой' }), /Только для админов/);
+});
+
+test('после переезда: склад читается, изменения отклоняются, напоминаний нет', () => {
+  const { env, api } = readyApp({ MOVED_TO: 'https://hrvd-bar.horovod.workers.dev', REMIND_CHAT: '-100', REMIND_TARE_TO: '1' });
+  const U1 = { id: String(USER.id), name: 'Миша' };
+  assert.ok(api.handle('list', {}, U1).products, 'склад отдаётся');
+  ['addPurchase','addCount','addReturn','update','delete','restore','reorder','updateProduct','addProduct','uploadReceipt','parseReceipt']
+    .forEach(a => throws(() => api.handle(a, { total: 1, items: {}, col: 'purchases', id: 'x', ids: ['a'] }, U1), /переехал/, a));
+  assert.ok(api.handle('export', {}, U1).team, 'выгрузка для сверки работает');
+  const before = env.drive.messages.length;
+  const r = api.remindTick();
+  assert.equal(r.moved, true);
+  assert.equal(env.drive.messages.length, before, 'ни одного сообщения');
+});
+
 test('производительность: обращений к листу на один list', () => {
   const { env, api } = readyApp();
   env.stats.reset();

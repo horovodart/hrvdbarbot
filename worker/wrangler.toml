@@ -1,0 +1,26 @@
+# HOROVOD HUB · бар — сервер. Выкатка: ./deploy.sh из корня (или npx wrangler deploy отсюда).
+name = "hrvd-bar"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+account_id = "19657a445252a6081236e6f6aee7b405"
+workers_dev = true
+preview_urls = false
+
+[vars]
+PUBLIC_URL = "https://hrvd-bar.horovod.workers.dev"
+
+# Каждый час: напоминания (шлются в 10 утра по Братиславе) и уборка.
+[triggers]
+crons = ["7 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "hrvd-bar"
+database_id = "bcc9d183-0747-47c2-8d37-bb93616afc69"
+
+[[kv_namespaces]]
+binding = "RECEIPTS"
+id = "0c29c794a07949cc9af715c17efda26f"
+
+[observability]
+enabled = true
