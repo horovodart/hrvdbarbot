@@ -38,7 +38,11 @@ echo "GitHub Pages: запушено ($(git rev-parse --short HEAD))"
 # Старый Apps Script заморожен (только чтение) и больше не выкатывается.
 node tools/build-seed.mjs >/dev/null
 [ -d worker/node_modules ] || (cd worker && npm install --silent) || die "npm install в worker не прошёл."
-(cd worker && npx wrangler deploy --var "VERSION:$(git rev-parse --short HEAD)" >/dev/null 2>&1) || die "wrangler deploy не прошёл."
+# </dev/null: без него wrangler мог молча ждать ответа на вопрос, и выкатка висела
+WLOG="$(mktemp)"
+(cd worker && npx --yes wrangler deploy --var "VERSION:$(git rev-parse --short HEAD)" </dev/null >"$WLOG" 2>&1) \
+  || { tail -20 "$WLOG"; die "wrangler deploy не прошёл."; }
+grep -q "Current Version ID" "$WLOG" || { tail -20 "$WLOG"; die "wrangler не подтвердил выкатку."; }
 echo "Сервер: выкачен на $API"
 
 # 5. Адрес мини-приложения в боте — со свежей версией.
@@ -64,6 +68,7 @@ for i in 1 2 3 4; do
   sleep $((i * 3))
 done
 echo "$RESP" | grep -q '"alive":true' || die "API не отвечает как надо: ${RESP:0:200}"
+echo "$RESP" | grep -q "\"version\":\"$(git rev-parse --short HEAD)\"" || die "На сервере не та версия: ${RESP:0:200}"
 echo "API живой: ${RESP:0:80}"
 
 # 7. Дымовой тест на живом: склад целиком, приложение сходится с эталоном на
