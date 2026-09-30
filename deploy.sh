@@ -38,11 +38,16 @@ echo "GitHub Pages: запушено ($(git rev-parse --short HEAD))"
 # Старый Apps Script заморожен (только чтение) и больше не выкатывается.
 node tools/build-seed.mjs >/dev/null
 [ -d worker/node_modules ] || (cd worker && npm install --silent) || die "npm install в worker не прошёл."
-# </dev/null: без него wrangler мог молча ждать ответа на вопрос, и выкатка висела
+# Запрос wrangler к Cloudflare однажды висел 11 минут и падал на сетевом сбое, хотя
+# сразу следом проходил за секунды. Поэтому каждая попытка — не дольше 3 минут, попыток три.
 WLOG="$(mktemp)"
-(cd worker && npx --yes wrangler deploy --var "VERSION:$(git rev-parse --short HEAD)" </dev/null >"$WLOG" 2>&1) \
-  || { tail -20 "$WLOG"; die "wrangler deploy не прошёл."; }
-grep -q "Current Version ID" "$WLOG" || { tail -20 "$WLOG"; die "wrangler не подтвердил выкатку."; }
+for try in 1 2 3; do
+  (cd worker && perl -e 'alarm shift; exec @ARGV' 180 npx --yes wrangler deploy --var "VERSION:$(git rev-parse --short HEAD)" </dev/null >"$WLOG" 2>&1) \
+    && grep -q "Current Version ID" "$WLOG" && break
+  echo "  wrangler: попытка $try не прошла, пробую ещё"
+  [ $try = 3 ] && { tail -20 "$WLOG"; die "wrangler deploy не прошёл."; }
+  sleep 5
+done
 echo "Сервер: выкачен на $API"
 
 # 5. Адрес мини-приложения в боте — со свежей версией.
