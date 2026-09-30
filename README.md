@@ -9,10 +9,11 @@
 |---|---|
 | `index.html`, `app.css`, `app.js` | само приложение (статика для GitHub Pages) |
 | `config.js` | единственный файл с настройками: сюда вписывается адрес API |
-| `api.js` | слой данных: продакшн — Apps Script, пусто — демо-режим из `hub-bar-data.json` |
+| `api.js` | слой данных: продакшн — сервер на Cloudflare, пусто — демо-режим из `hub-bar-data.json` |
 | `img/*.webp` | фото напитков с вырезанным фоном, имя файла = id товара |
 | `hub-bar-data.json` | данные: товары, подсчёты, закупки |
-| `apps-script/` | серверная часть: `Code.gs` (API), `Seed.gs` (первичная заливка) |
+| `worker/` | сервер: Cloudflare Worker (`src/index.js`), таблицы базы (`schema.sql`), настройки (`wrangler.toml`) |
+| `apps-script/` | прежний сервер на Google (только чтение с 30.09.2026) и `Seed.gs` — справочник товаров и команда |
 | `hub-bar-prototype.html` | исходный прототип, оставлен как эталон логики |
 
 ## Демо-режим
@@ -27,30 +28,54 @@
 python3 -m http.server 8732
 ```
 
-## Боевой контур
+## Как это работает
 
-1. **Таблица.** Создать Google Таблицу на horovod.info@gmail.com, назвать «HOROVOD HUB · бар».
-2. **Скрипт.** Расширения → Apps Script. Вставить `apps-script/Code.gs` и `apps-script/Seed.gs`.
-3. **Свойства.** Project Settings → Script Properties:
-   - `BOT_TOKEN` — токен бота @hrvdbarbot (единственное обязательное);
-   - `ADMIN_IDS` — telegram id через запятую, необязательно.
-4. **Заливка.** Выполнить функцию `setup()` — создаст листы `products`, `counts`, `purchases`, `team`
-   и зальёт данные. Проверить `selfTest()`.
-5. **Деплой.** Deploy → New deployment → Web app: Execute as **Me**, Who has access **Anyone**.
-   Скопировать URL вида `https://script.google.com/macros/s/…/exec`.
-6. **Связать.** Вписать этот URL в `config.js → API`, запушить на GitHub Pages.
-7. **Команда.** Лист `team` создаётся пустым. Первый, кто откроет приложение через Telegram,
-   автоматически записывается туда админом — дальше пускает только тех, кто есть в листе.
-   Поэтому открыть приложение первым должен ты. Остальных добавлять строками:
-   telegram id, имя, роль (id человек узнаёт у @userinfobot).
-8. **Бот.** BotFather → `/mybots` → @hrvdbarbot → Bot Settings → Menu Button → адрес GitHub Pages.
+| Часть | Где |
+|---|---|
+| Экраны | **GitHub Pages**, бесплатно: https://horovodart.github.io/hrvdbarbot/ |
+| Сервер (`worker/`) | **Cloudflare Workers**, бесплатно: https://hrvd-bar.horovod.workers.dev — отвечает за доли секунды и не «засыпает» |
+| Данные | Cloudflare **D1**, база `hrvd-bar`: таблицы `products`, `counts`, `purchases`, `returns`, `team`, `props`, `rids` (`worker/schema.sql`). Каждая запись — JSON с теми же полями, что были колонками Google-таблицы |
+| Фото чеков | в Telegram — документом в переписке админа с ботом (архив, как и раньше); копия лежит в Cloudflare **KV** `hrvd-bar-receipts`, оттуда чек открывается сразу |
+| Напоминания | cron Cloudflare раз в час; шлёт в 10 утра по Братиславе |
+| Адрес сервера | `config.js` |
 
-Проверка API без Telegram (должна вернуть `ok:false` с просьбой открыть через Telegram —
-значит, защита работает):
+До 30.09.2026 сервером был Google Apps Script с таблицей; он «просыпался» по 10–20 секунд.
+Он оставлен в режиме **только чтение**: копиям приложения, которые Telegram держит в кэше,
+отдаёт склад, а на любое изменение отвечает «Сервер переехал. Закройте приложение полностью и
+откройте снова». Сообщений и напоминаний не шлёт. Google-таблица осталась как архив на момент
+переезда. Когда старые копии перестанут встречаться, скрипт можно выключить в редакторе Apps Script.
+
+Протокол у нового сервера тот же, что был у старого:
+`POST / { action, payload, initData } → { ok: true, data } | { ok: false, error, status }`.
+Вход — по подписи Telegram (`initData`) и списку команды (таблица `team`) или `ADMIN_IDS`.
+`GET /` — проверка живости: версия и счётчики, без имён и id.
+
+### Выкатка сервера
+
+Сервер выкатывает `./deploy.sh` вместе со всем остальным. Руками, если нужно отдельно:
 
 ```bash
-curl -s -X POST -H 'Content-Type: text/plain' -d '{"action":"list"}' "ВСТАВЬ_URL_ДЕПЛОЯ"
+cd worker && npm install
+export CLOUDFLARE_API_TOKEN=…   # лежит в .env.local
+npx wrangler deploy --var VERSION:$(git rev-parse --short HEAD)
 ```
+
+Секреты — только в Cloudflare, в git их нет: `BOT_TOKEN` (ключ бота) и `ANTHROPIC_KEY`
+(разбор чека) — `npx wrangler secret put ИМЯ`. Настройки — в таблице `props`:
+`REMIND_COUNT_TO`, `REMIND_TARE_TO`, `REMIND_CHAT`, `RECEIPTS_CHAT`, `ADMIN_IDS`, `REMIND_HOUR`,
+`REMINDERS_ON`. Поменять:
+
+```bash
+npx wrangler d1 execute hrvd-bar --remote --command "UPDATE props SET value='…' WHERE key='…'"
+```
+
+Справочник товаров по-прежнему правится в `apps-script/Seed.gs` (с подъёмом `SEED_VERSION`);
+`deploy.sh` собирает из него `worker/src/seed.js`. Цену закупки и «распродаём» синк не трогает.
+Подсчёты, закупки и сдачи тары — данные команды: из кода только досыпаются недостающие, но
+никогда не переписываются.
+
+Выгрузить всё как есть (только админам): действие `export` — так делался переезд
+(`tools/import-d1.mjs` превращает выгрузку в SQL для D1).
 
 ## Как считается
 
@@ -75,16 +100,14 @@ curl -s -X POST -H 'Content-Type: text/plain' -d '{"action":"list"}' "ВСТАВ
 |---|---|
 | Приложение | https://horovodart.github.io/hrvdbarbot/ |
 | Бот | @hrvdbarbot (кнопка меню «Бар») |
-| API | Apps Script Web App, URL в `config.js` |
-| Таблица | Google Sheets `1EAp62lw_p1MLIDL_vFgPVupboA7DosjZ3afDUblJ6LQ` на horovod.info@gmail.com |
-
-Данные в таблицу заливаются сами при первом обращении из Telegram. Первый, кто откроет
-приложение, записывается в лист `team` админом.
+| API | https://hrvd-bar.horovod.workers.dev (Cloudflare, аккаунт horovod.info@gmail.com) |
+| Данные | Cloudflare D1 `hrvd-bar` |
+| Архив до переезда | Google Sheets `1EAp62lw_p1MLIDL_vFgPVupboA7DosjZ3afDUblJ6LQ` на horovod.info@gmail.com |
 
 ## Напоминания от бота
 
-Раз в день, с 10 до 11 утра, срабатывает таймер `remindTick` (стоит в редакторе
-скрипта → «Триггеры»). Он пишет, только когда есть повод:
+Сервер просыпается по cron раз в час и в 10 утра по Братиславе проверяет, есть ли повод
+(час меняется настройкой `REMIND_HOUR`). Пишет, только когда повод есть:
 
 - **подсчёт** — на 14-й день после прошлого и ещё раз на 21-й, если так и не
   посчитали; новый подсчёт сбрасывает счётчик;
@@ -94,9 +117,9 @@ curl -s -X POST -H 'Content-Type: text/plain' -d '{"action":"list"}' "ВСТАВ
   ровно как в приложении, и дымовой тест сверяет их на живых данных. Напоминает
   один раз на каждую сдачу: сдали — счёт пошёл заново.
 
-Кому — свойства скрипта: `REMIND_COUNT_TO` для подсчёта и `REMIND_TARE_TO` для
+Кому — настройки в таблице `props`: `REMIND_COUNT_TO` для подсчёта и `REMIND_TARE_TO` для
 тары, id через запятую. Если не заданы — `REMIND_CHAT` (общий чат), иначе вся
-команда из листа `team`. Сейчас подсчёт — Кате (`587696431`), тара — Мише (`1285269855`). Кто не нажимал
+команда из таблицы `team`. Выключатель — `REMINDERS_ON` (`yes`). Сейчас подсчёт — Кате (`587696431`), тара — Мише (`1285269855`). Кто не нажимал
 «Старт» у бота, тому Telegram написать не даст.
 
 Что бот отправил бы сегодня и скольким людям — видно в дымовом тесте.
@@ -133,9 +156,9 @@ curl -s -X POST -H 'Content-Type: text/plain' -d '{"action":"list"}' "ВСТАВ
 ```
 
 По шагам: гоняет все тесты → штампует версию на `js/css` → коммит и пуш на
-GitHub Pages → `clasp push` и `clasp deploy` на **тот же** адрес `/exec`, чтобы
-`config.js` не трогать → обновляет адрес мини-приложения в боте → дёргает живой
-API и проверяет, что он отвечает. Если падает любой шаг — деплой останавливается,
+GitHub Pages → `wrangler deploy` сервера на Cloudflare → обновляет адрес
+мини-приложения в боте → дёргает живой API и проверяет, что он отвечает →
+дымовой тест. Нужен `.env.local` с `BOT_TOKEN` и `CLOUDFLARE_API_TOKEN`. Если падает любой шаг — деплой останавливается,
 а не доезжает наполовину.
 
 ### Про кэш Telegram — это кусалось
@@ -166,12 +189,13 @@ API и проверяет, что он отвечает. Если падает �
 ./tools/test.sh 3000     # длинный прогон
 ```
 
-Четыре набора:
+Пять наборов:
 
 | набор | что проверяет |
 |---|---|
 | `tools/tests/front/` | `model()` целиком: заморозка сумм, короткие периоды, амнистия, планка, тара, статусы, форматирование |
-| `tools/tests/server/` | `Code.gs` на моках Google-окружения: синк, `auth`, замки, защита от формул, число обращений к листам |
+| `tools/tests/worker/` | сервер на Cloudflare: настоящая SQLite (движок D1), KV в памяти, поддельные Telegram и модель. Каждое действие, вход, фото чеков, разбор, напоминания, выгрузка, скорость — и сверка «те же действия на старом и новом сервере дают тот же склад» |
+| `tools/tests/server/` | прежний `Code.gs` на моках Google-окружения: синк, `auth`, замки, режим «переехал», выгрузка |
 | `tools/tests/fuzz/` | случайные склады против `tools/reference.py` — второй, независимой реализации той же логики |
 | `tools/tests/fuzz/minimal.mjs` | регрессии на уже починенные расхождения |
 
@@ -195,16 +219,12 @@ API и проверяет, что он отвечает. Если падает �
 Хук лежит в `.git/hooks/`, а он не копируется вместе с репозиторием — поэтому
 на новой машине его надо поставить заново. Осознанно обойти: `git push --no-verify`.
 
-### Если правишь Apps Script
+### Старый сервер (Apps Script)
 
-`clasp` уже настроен, руками в редактор ничего вставлять не надо — `./deploy.sh`
-сам делает `push` и `deploy` на прежний адрес. Отдельно, без выкатки фронтенда:
+Заморожен: `MOVED_TO_DEFAULT` в `apps-script/Code.gs`. `deploy.sh` его больше не выкатывает.
+Если когда-нибудь понадобится (например, ещё раз выгрузить таблицу):
 
 ```bash
 ./node_modules/.bin/clasp push --force
-./node_modules/.bin/clasp deployments    # посмотреть адреса
+./node_modules/.bin/clasp deploy --deploymentId AKfycbzi8qpBcZcRBG2ILmajQ6Nj-8DelwH8y1cUJkOZqeTucJnkzW6vaeNixEKXuIIUDKJ9
 ```
-
-Новый `deploy` **без** `--deploymentId` создаёт новый адрес `/exec` — тогда
-придётся править `config.js` и переустанавливать ссылку в боте. `deploy.sh`
-всегда выкатывает на прежний, так что этой ловушки можно не касаться.

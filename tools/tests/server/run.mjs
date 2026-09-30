@@ -1191,6 +1191,12 @@ test('после переезда: склад читается, изменени
   assert.equal(env.drive.messages.length, before, 'ни одного сообщения');
 });
 
+test('боевой скрипт по умолчанию в режиме «переехал»', () => {
+  const { api } = readyApp({ MOVED_TO: undefined });
+  throws(() => api.handle('addReturn', { amount: 1 }, { id: String(USER.id), name: 'Миша' }), /переехал/);
+  assert.ok(/hrvd-bar\.horovod\.workers\.dev/.test(api.movedTo()), 'куда переехал — видно');
+});
+
 test('производительность: обращений к листу на один list', () => {
   const { env, api } = readyApp();
   env.stats.reset();

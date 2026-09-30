@@ -1,8 +1,9 @@
 /* Настройки приложения. Единственный файл, который меняется при деплое. */
 window.HUB_CONFIG = {
-  // URL веб-приложения Google Apps Script. Пусто → приложение работает
+  // Адрес сервера (Cloudflare Worker, worker/). Пусто → приложение работает
   // в демо-режиме: читает hub-bar-data.json и держит правки в браузере.
-  API: "https://script.google.com/macros/s/AKfycbzi8qpBcZcRBG2ILmajQ6Nj-8DelwH8y1cUJkOZqeTucJnkzW6vaeNixEKXuIIUDKJ9/exec",
+  // До 30.09.2026 сервером был Google Apps Script (apps-script/), теперь он только читает.
+  API: "https://hrvd-bar.horovod.workers.dev/",
 
   SEED: "hub-bar-data.json",
   SALE_PRICE: 1.50,   // цена напитка для команды

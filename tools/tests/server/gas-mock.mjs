@@ -216,7 +216,8 @@ function signed(buf) {
 export function makeEnv(opts = {}) {
   const stats = makeStats();
   const book = new FakeBook(opts.sheets || {}, stats);
-  const props = Object.assign({}, opts.props || {});
+  // боевой Apps Script заморожен (переехал на Cloudflare); тесты проверяют его логику как живую
+  const props = Object.assign({ MOVED_TO: 'off' }, opts.props || {});
   const lockCalls = { waitLock: 0, tryLock: 0, releaseLock: 0, held: 0 };
 
   const SpreadsheetApp = {

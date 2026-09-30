@@ -140,9 +140,9 @@ function tick(what){ try { console.log((Date.now() - T0) + ' мс · ' + what) }
 /* Переезд. Сервер теперь на Cloudflare; этот остаётся только для копий приложения,
    которые Telegram держит в кэше: склад показывает, но ничего не меняет и никому не пишет —
    иначе данные разъехались бы по двум серверам. */
-var MOVED_TO_DEFAULT = '';
+var MOVED_TO_DEFAULT = 'https://hrvd-bar.horovod.workers.dev';   // с 30.09.2026
 var MOVED_MSG = 'Сервер переехал. Закройте приложение полностью и откройте снова.';
-function movedTo(){ return prop('MOVED_TO') || MOVED_TO_DEFAULT }
+function movedTo(){ var p = prop('MOVED_TO'); return p === 'off' ? '' : (p || MOVED_TO_DEFAULT) }
 var READ_ONLY_ACTIONS = {list:1, getReceipt:1, tareNow:1, remindPlan:1, export:1};
 
 function isAdmin(id){

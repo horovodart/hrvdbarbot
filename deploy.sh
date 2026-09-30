@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
-# Выкатка HOROVOD HUB целиком: тесты → версия → GitHub Pages → Apps Script → проверка живого API.
+# Выкатка HOROVOD HUB целиком: тесты → версия → GitHub Pages → сервер на Cloudflare → проверка живого API.
 # Ни один шаг не выполняется, если упали тесты.
 #
 #   ./deploy.sh "что поменяли"    — закоммитить правки и выкатить
 #   ./deploy.sh                   — выкатить то, что уже закоммичено
+#
+# Нужен .env.local с BOT_TOKEN и CLOUDFLARE_API_TOKEN (в git не попадает).
 set -uo pipefail
 cd "$(dirname "$0")"
 
-DEPLOY_ID=AKfycbzi8qpBcZcRBG2ILmajQ6Nj-8DelwH8y1cUJkOZqeTucJnkzW6vaeNixEKXuIIUDKJ9
-API="https://script.google.com/macros/s/$DEPLOY_ID/exec"
-CLASP=./node_modules/.bin/clasp
+API="https://hrvd-bar.horovod.workers.dev/"
 MSG="${1:-}"
+[ -f .env.local ] && . ./.env.local
+export CLOUDFLARE_API_TOKEN="${CLOUDFLARE_API_TOKEN:-}"
+export CLOUDFLARE_ACCOUNT_ID=19657a445252a6081236e6f6aee7b405
 
 die () { echo; echo "✗ $1"; exit 1; }
+
+[ -n "$CLOUDFLARE_API_TOKEN" ] || die "Нет CLOUDFLARE_API_TOKEN в .env.local — сервер не выкатить."
 
 # 1. Тесты. Всё остальное — только после них.
 ./tools/test.sh 500 || die "Тесты не прошли, ничего не выкачено."
@@ -29,17 +34,17 @@ fi
 git push -q --no-verify origin main || die "Пуш в GitHub не прошёл."
 echo "GitHub Pages: запушено ($(git rev-parse --short HEAD))"
 
-# 4. Apps Script — на тот же адрес, чтобы config.js не пришлось править.
-$CLASP push --force >/dev/null || die "clasp push не прошёл."
-$CLASP deploy --deploymentId "$DEPLOY_ID" --description "${MSG:-$(git log -1 --pretty=%s)}" >/dev/null \
-  || die "clasp deploy не прошёл."
-echo "Apps Script: выкачено на прежний адрес"
+# 4. Сервер на Cloudflare. Справочник для него собирается из apps-script/Seed.gs.
+# Старый Apps Script заморожен (только чтение) и больше не выкатывается.
+node tools/build-seed.mjs >/dev/null
+[ -d worker/node_modules ] || (cd worker && npm install --silent) || die "npm install в worker не прошёл."
+(cd worker && npx wrangler deploy --var "VERSION:$(git rev-parse --short HEAD)" >/dev/null 2>&1) || die "wrangler deploy не прошёл."
+echo "Сервер: выкачен на $API"
 
 # 5. Адрес мини-приложения в боте — со свежей версией.
 # Telegram кэширует index.html намертво и версии на js/css его не трогают:
 # единственный способ заставить его перечитать страницу — сменить сам адрес.
 if [ -f .env.local ]; then
-  . ./.env.local
   if [ -n "${BOT_TOKEN:-}" ]; then
     MENU_URL="https://horovodart.github.io/hrvdbarbot/?v=$(git rev-parse --short HEAD)"
     OUT="$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/setChatMenuButton" \
@@ -52,9 +57,6 @@ else
 fi
 
 # 6. Живой API должен ответить — деплой без проверки не считается сделанным.
-# Apps Script изредка отдаёт пустоту или HTML-заглушку вместо ответа — одного
-# выстрела мало, иначе деплой ругается на ровном месте.
-sleep 3
 RESP=""
 for i in 1 2 3 4; do
   RESP="$(curl -s -L --max-time 30 "$API")"

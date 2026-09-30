@@ -31,7 +31,7 @@ if (existsSync(envFile))
   }
 const TOKEN = process.env.BOT_TOKEN || env.BOT_TOKEN;
 const USER_ID = Number(process.env.SMOKE_USER_ID || env.SMOKE_USER_ID || 1285269855);
-const API = readFileSync(path.join(ROOT, "config.js"), "utf8").match(/API:\s*"([^"]+)"/)?.[1];
+const API = process.env.SMOKE_API || readFileSync(path.join(ROOT, "config.js"), "utf8").match(/API:\s*"([^"]+)"/)?.[1];
 
 let fail = 0;
 const ok  = (t, extra = "") => console.log(`  ✓ ${t}${extra ? " — " + extra : ""}`);
