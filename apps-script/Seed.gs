@@ -51,6 +51,11 @@ var TEAM_SEED = [
     "id": "1473311875",
     "name": "Алмаз",
     "role": "admin"
+  },
+  {
+    "id": "752649265",
+    "name": "—",
+    "role": "member"
   }
 ];
 

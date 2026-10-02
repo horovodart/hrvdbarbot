@@ -659,6 +659,8 @@ function parseReceipt(photo){
    иначе REMIND_CHAT, иначе вся команда. Каждое напоминание — раз на своё состояние. */
 var REMIND = {countDays: 14, countAgain: 21, tareEur: 10};
 
+function daysWord(n){ var m = Math.abs(n) % 100, k = m % 10;
+  return m > 10 && m < 20 ? 'дней' : k === 1 ? 'день' : k > 1 && k < 5 ? 'дня' : 'дней' }
 function lastBy(list){ return list.slice().sort(function(a,b){ return a.date < b.date ? -1 : 1 }).pop() || null }
 function notDeleted(list){ return list.filter(function(r){ return !r.deleted }) }
 
@@ -711,10 +713,11 @@ function remindPlan(now){
     var dd = last.date.slice(8,10) + '.' + last.date.slice(5,7);
     if (d >= REMIND.countAgain && props.getProperty('REMIND_COUNT2') !== last.id)
       plan.push({kind:'count2', key:'REMIND_COUNT2', val:last.id,
-        text:'Подсчёт не делали уже ' + d + ' дней — с ' + dd + '. Без него недобор и закупка считаются вслепую.'});
-    else if (d >= REMIND.countDays && props.getProperty('REMIND_COUNT') !== last.id)
+        text:'Подсчёт не делали уже ' + d + ' ' + daysWord(d) + ' — с ' + dd + '. Без него недобор и закупка считаются вслепую.'});
+    // после 21 дня только строгое: иначе назавтра пришло бы ещё и мягкое «пора считать»
+    else if (d >= REMIND.countDays && d < REMIND.countAgain && props.getProperty('REMIND_COUNT') !== last.id)
       plan.push({kind:'count', key:'REMIND_COUNT', val:last.id,
-        text:'Пора считать склад: прошлый подсчёт был ' + dd + ', прошло ' + d + ' дней.'});
+        text:'Пора считать склад: прошлый подсчёт был ' + dd + ', прошло ' + d + ' ' + daysWord(d) + '.'});
   }
   // тара: один раз на каждую сдачу — сдали, и счёт пошёл заново
   var t = tareForecast(now);

@@ -379,6 +379,15 @@ await test("9. напоминания и прогноз тары", async () => {
   const later = new Date(Date.parse(last) + 22 * 864e5); later.setUTCHours(8, 7, 0, 0);
   await w2.cron(later);
   ok("9.10 через 21 день — второе, построже", w2.of("sendMessage").slice(n).some((m) => /не делали уже/.test(m.params.text)));
+  // бот был выключен на 14-й день (как при переезде): на 22-й — строгое, а назавтра мягкое не догоняет
+  const w4 = world({ props: { REMINDERS_ON: "yes", REMIND_COUNT_TO: "587696431" } });
+  await w4.must("list");
+  const d22 = new Date(Date.parse(last) + 22 * 864e5); d22.setUTCHours(8, 7, 0, 0);
+  const d23 = new Date(d22.getTime() + 864e5);
+  await w4.cron(d22); await w4.cron(d23);
+  const texts = w4.of("sendMessage").filter((m) => m.params.chat_id === "587696431" && /считать|не делали/.test(m.params.text)).map((m) => m.params.text);
+  ok("9.10a пропущенный 14-й день: одно строгое напоминание и всё", texts.length === 1 && /не делали уже/.test(texts[0]), JSON.stringify(texts));
+  ok("9.10b «21 день», а не «21 дней»", /уже 21 день —/.test(texts[0] || ""), texts[0]);
   const w3 = world({ props: { REMINDERS_ON: "yes", REMIND_CHAT: "заблокировал" } });
   await w3.must("list");
   await w3.cron(due);

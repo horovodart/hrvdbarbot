@@ -740,6 +740,11 @@ const REMIND = { countDays: 14, countAgain: 21, tareEur: 10 };
 const TIME_ZONE = 'Europe/Bratislava';
 
 const notDeleted = (list) => list.filter((r) => !r.deleted);
+const daysWord = (n) => {
+  const m = Math.abs(n) % 100;
+  const k = m % 10;
+  return m > 10 && m < 20 ? 'дней' : k === 1 ? 'день' : k > 1 && k < 5 ? 'дня' : 'дней';
+};
 const lastBy = (list) => list.slice().sort((x, y) => (x.date < y.date ? -1 : 1)).pop() || null;
 
 export function tareForecast(list, now) {
@@ -803,10 +808,11 @@ async function remindPlan(a, now) {
     const dd = last.date.slice(8, 10) + '.' + last.date.slice(5, 7);
     if (d >= REMIND.countAgain && prop(a, 'REMIND_COUNT2') !== last.id)
       plan.push({ kind: 'count2', key: 'REMIND_COUNT2', val: last.id,
-        text: 'Подсчёт не делали уже ' + d + ' дней — с ' + dd + '. Без него недобор и закупка считаются вслепую.' });
-    else if (d >= REMIND.countDays && prop(a, 'REMIND_COUNT') !== last.id)
+        text: 'Подсчёт не делали уже ' + d + ' ' + daysWord(d) + ' — с ' + dd + '. Без него недобор и закупка считаются вслепую.' });
+    // после 21 дня только строгое: иначе назавтра пришло бы ещё и мягкое «пора считать»
+    else if (d >= REMIND.countDays && d < REMIND.countAgain && prop(a, 'REMIND_COUNT') !== last.id)
       plan.push({ kind: 'count', key: 'REMIND_COUNT', val: last.id,
-        text: 'Пора считать склад: прошлый подсчёт был ' + dd + ', прошло ' + d + ' дней.' });
+        text: 'Пора считать склад: прошлый подсчёт был ' + dd + ', прошло ' + d + ' ' + daysWord(d) + '.' });
   }
   // тара: один раз на каждую сдачу — сдали, и счёт пошёл заново
   const t = tareForecast(list, now);

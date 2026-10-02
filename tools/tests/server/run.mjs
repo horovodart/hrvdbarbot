@@ -1221,7 +1221,7 @@ test('delete запрещён для листа не из белого спис�
   throws(() => api.handle('delete', { col: 'team', id: '1285269855' }, { id: '1', name: 'Миша' }),
     /Нельзя удалять из team/);
   assert.equal(env.lockCalls.held, 0, 'замок отпущен');
-  assert.equal(body(env.dump('team')).length, 9, 'команда цела');
+  assert.equal(body(env.dump('team')).length, api.TEAM_SEED.length, 'команда цела');
   throws(() => api.handle('delete', { col: '__proto__', id: 'x' }, null), /Нельзя удалять/);
   throws(() => api.handle('delete', { col: undefined, id: 'x' }, null), /Нельзя удалять/);
 });
@@ -1347,8 +1347,16 @@ test('кому что: подсчёт только Кате, тара — сво
   assert.deepEqual(byKind('tare').sort(), ['1285269855','450027563'], 'про тару — своим');
 });
 
+test('пропустили 14-й день — шлём только строгое, и назавтра мягкое не догоняет', () => {
+  const { api } = newApp({ sheets: remindBook([{id:'c1', date: day(0), stock:{kozel05:10}}]),
+    props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN, REMIND_COUNT2: 'c1' } });
+  const kinds = api.remindPlan(new Date(day(23))).map(m => m.kind).filter(k => k !== 'tare');
+  assert.deepEqual(kinds, [], 'строгое уже было — «пора считать» после 21 дня не шлём');
+});
+
 test('отправка: всем из команды, с кнопкой в приложение, и не повторяет', () => {
-  const { env, api } = newApp({ sheets: remindBook([{id:'c1', date: day(-20), stock:{kozel05:10}}]),
+  // от сегодняшнего дня, а не от 01.10: таймер смотрит на настоящие часы
+  const { env, api } = newApp({ sheets: remindBook([{id:'c1', date: new Date(Date.now() - 16 * 864e5).toISOString(), stock:{kozel05:10}}]),
     props: { SEED_VERSION: SEEDV, BOT_TOKEN: TOKEN } });
   const team = api.rows('team').length;
   const r = api.remindTick();
